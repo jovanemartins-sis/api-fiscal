@@ -11,7 +11,7 @@ const app = express();
 app.use(express.json({ limit: '5mb' }));
 app.use(cors());
 
-// Configurações do Emitente (Elaine Cristina)
+// Configurações do Emitente
 const EMITENTE = {
     cnpj: "66304541000111",
     xNome: "66.304.541 ELAINE CRISTINA DE CAMARGO DE SOUZA",
@@ -159,7 +159,7 @@ app.post('/emitir-nfce', (req, res) => {
             sig.addReference(
                 "//*[local-name()='infNFe']",
                 ["http://www.w3.org/2000/09/xmldsig#enveloped-signature", "http://www.w3.org/2001/10/xml-exc-c14n#"],
-                "http://www.w3.org/2000/09/xmldsig#sha1"
+                "http://www.w3.org/2001/04/xmlenc#sha256" // Alterado para SHA-256 (Obrigatório pela SEFAZ)
             );
             sig.signingKey = privateKey;
             sig.computeSignature(xmlNFe);
