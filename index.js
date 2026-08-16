@@ -77,7 +77,7 @@ function carregarPfxParaAssinatura() {
     let privateKey = null;
     const pems = [];
 
-    // Extrai TODOS os certificados da cadeia (Titular + Intermediárias da AC)
+    // Extrai TODOS os certificados da cadeia (Titular + Intermediárias da AC) para evitar erro 400 no IIS da SEFAZ
     const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
     const certificados = certBags[forge.pki.oids.certBag] || [];
     for (const bag of certificados) {
@@ -111,7 +111,7 @@ function criarHttpsAgent() {
 
     return new https.Agent({
         key: certificado.privateKey,
-        cert: certificado.publicCert, // Envia a cadeia completa exigida pelo IIS da SEFAZ
+        cert: certificado.publicCert,
         rejectUnauthorized: false,
         secureOptions: crypto.constants.SSL_OP_NO_TLSv1 | crypto.constants.SSL_OP_NO_TLSv1_1 | crypto.constants.SSL_OP_NO_TLSv1_3,
         minVersion: "TLSv1.2",
@@ -285,6 +285,9 @@ app.post("/transmitir-nfce", async (req, res) => {
         const soap = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4"><enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><idLote>${idLote}</idLote><indSinc>1</indSinc>${xmlAssinado}</enviNFe></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
 
         const httpsAgent = criarHttpsAgent();
+
+        console.log("--- ENVIANDO LOTE PARA SEFAZ-SP ---");
+        console.log("Lote ID:", idLote);
 
         const resposta = await axios.post(CONFIG.urlAutorizacao, soap, {
             httpsAgent,
