@@ -602,6 +602,84 @@ app.get("/testar-certificado", (req, res) => {
 });
 
 /* =========================================================
+   TESTAR SEFAZ (STATUS SERVIÇO)
+========================================================= */
+
+app.get("/testar-sefaz", async (req, res) => {
+    try {
+        const certificado = carregarPfx();
+
+        const soap = `
+<soap12:Envelope
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+    <soap12:Body>
+        <nfeDadosMsg
+            xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeStatusServico4">
+            <consStatServ
+                xmlns="http://www.portalfiscal.inf.br/nfe"
+                versao="4.00">
+                <tpAmb>2</tpAmb>
+                <cUF>35</cUF>
+                <xServ>STATUS</xServ>
+            </consStatServ>
+        </nfeDadosMsg>
+    </soap12:Body>
+</soap12:Envelope>
+`.trim();
+
+        const httpsAgent = new https.Agent({
+            key: certificado.privateKey,
+            cert: certificado.publicCert,
+            rejectUnauthorized: true,
+            minVersion: "TLSv1.2"
+        });
+
+        const resposta = await axios.post(
+            "https://homologacao.nfce.fazenda.sp.gov.br/ws/NFeStatusServico4.asmx",
+            soap,
+            {
+                httpsAgent,
+                timeout: 60000,
+                headers: {
+                    "Content-Type": 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeStatusServico4/nfeStatusServicoNF"',
+                    "Accept": "application/soap+xml, text/xml, */*"
+                },
+                validateStatus: () => true
+            }
+        );
+
+        console.log("===== TESTE SEFAZ =====");
+        console.log("STATUS:", resposta.status);
+        console.log("RESPOSTA:", resposta.data);
+        console.log("=======================");
+
+        res.json({
+            sucesso: resposta.status >= 200 && resposta.status < 300,
+            status: resposta.status,
+            respostaSefaz: resposta.data
+        });
+
+    } catch (erro) {
+        console.error("===== ERRO TESTE SEFAZ =====");
+        console.error("MESSAGE:", erro.message);
+        console.error("CODE:", erro.code);
+        console.error("STATUS:", erro.response?.status);
+        console.error("DATA:", erro.response?.data);
+        console.error("============================");
+
+        res.status(500).json({
+            sucesso: false,
+            erro: erro.message,
+            codigoRede: erro.code || null,
+            status: erro.response?.status || null,
+            respostaSefaz: erro.response?.data || null
+        });
+    }
+});
+
+/* =========================================================
    INICIAR
 ========================================================= */
 
