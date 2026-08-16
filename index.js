@@ -6,9 +6,10 @@ const { SignedXml } = require('xml-crypto');
 const forge = require('node-forge');
 const axios = require('axios');
 const https = require('https');
+const constants = require('constants');
 
 const app = express();
-app.use(express.json({ limit: '5mb' })); // Aumentado limite para XMLs
+app.use(express.json({ limit: '5mb' }));
 app.use(cors());
 
 // Configurações do Emitente
@@ -46,8 +47,8 @@ app.post('/emitir-nfce', (req, res) => {
         const nNF = Math.floor(Math.random() * 999999) + 1;
         const chNFe = `352608${EMITENTE.cnpj}65001000${String(nNF).padStart(9, '0')}15`;
 
-        let xmlNFe = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${chNFe}" versao="4.00">...</infNFe></NFe>`;
-        // (Estrutura simplificada para o exemplo, preencha com o XML completo do passo anterior)
+        // XML Simples para estrutura
+        let xmlNFe = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${chNFe}" versao="4.00"><ide><cUF>35</cUF><mod>65</mod><nNF>${nNF}</nNF></ide></infNFe></NFe>`;
 
         let xmlAssinado = xmlNFe;
         const certPath = path.join(__dirname, 'certificado.pfx');
@@ -67,11 +68,11 @@ app.post('/emitir-nfce', (req, res) => {
 
         res.json({ sucesso: true, xmlAssinado, chaveAcesso: chNFe });
     } catch (erro) {
-        res.status(500).json({ erro: erro.message });
+        res.status(500).json({ sucesso: false, erro: erro.message });
     }
 });
 
-// Rota 2: Transmitir para a SEFAZ
+// Rota 2: Transmitir para a SEFAZ com Timeout e SOAPAction
 app.post('/transmitir-nfce', async (req, res) => {
     try {
         const { xmlAssinado } = req.body;
@@ -79,21 +80,27 @@ app.post('/transmitir-nfce', async (req, res) => {
         const httpsAgent = new https.Agent({
             pfx: fs.readFileSync(path.join(__dirname, 'certificado.pfx')),
             passphrase: process.env.CERT_PASSWORD,
-            rejectUnauthorized: false
+            rejectUnauthorized: false,
+            secureOptions: constants.SSL_OP_NO_TLSv1 | constants.SSL_OP_NO_TLSv1_1
         });
 
         const soapEnvelope = `<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">${xmlAssinado}</nfeDadosMsg></soap:Body></soap:Envelope>`;
 
         const resposta = await axios.post("https://homologacao.nfce.fazenda.sp.gov.br/nfceWEB/services/NFeAutorizacao4.asmx", soapEnvelope, {
-            headers: { 'Content-Type': 'application/soap+xml; charset=utf-8' },
-            httpsAgent
+            headers: { 
+                'Content-Type': 'application/soap+xml; charset=utf-8',
+                'SOAPAction': 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote'
+            },
+            httpsAgent,
+            timeout: 15000 
         });
 
         res.json({ sucesso: true, retorno: resposta.data });
     } catch (erro) {
-        res.status(500).json({ erro: "Falha na comunicação com SEFAZ" });
+        console.error("ERRO DETALHADO NO SERVIDOR:", erro.message);
+        res.status(500).json({ sucesso: false, erro: erro.message });
     }
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
