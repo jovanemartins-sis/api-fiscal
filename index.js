@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const https = require("https");
+const crypto = require("crypto");
 const forge = require("node-forge");
 const { SignedXml } = require("xml-crypto");
 
@@ -110,6 +111,7 @@ function criarHttpsAgent() {
         pfx: fs.readFileSync(certPath),
         passphrase: senha,
         rejectUnauthorized: false,
+        secureOptions: crypto.constants.SSL_OP_NO_TLSv1 | crypto.constants.SSL_OP_NO_TLSv1_1 | crypto.constants.SSL_OP_NO_TLSv1_3,
         minVersion: "TLSv1.2",
         maxVersion: "TLSv1.2"
     });
@@ -257,7 +259,7 @@ app.post("/emitir-nfce", (req, res) => {
     try {
         const numero = Math.floor(Math.random() * 999999999) + 1;
         const dhEmi = dataHoraSaoPaulo();
-        const cNF = String(Math.floor(Math.random() * 99999999)).padStart(8, "0");
+        const cNF = String(Math.floor(Math.random() * 99999998) + 1).padStart(8, "0");
 
         const nfce = montarXmlNFCe({ numero, dhEmi, cNF });
         const certificado = carregarPfxParaAssinatura();
@@ -278,7 +280,6 @@ app.post("/transmitir-nfce", async (req, res) => {
         const xmlAssinado = req.body.xmlAssinado;
         const idLote = String(Date.now()).slice(-15);
 
-        // Envelope SOAP rigoroso sem quebras de linha que corrompem o parser do IIS/ASMX da SEFAZ
         const soap = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4"><enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><idLote>${idLote}</idLote><indSinc>1</indSinc>${xmlAssinado}</enviNFe></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
 
         const httpsAgent = criarHttpsAgent();
