@@ -123,7 +123,10 @@ app.post('/transmitir-nfce', async (req, res) => {
             httpsAgent: new https.Agent({ pfx: fs.readFileSync(path.join(__dirname, 'certificado.pfx')), passphrase: process.env.CERT_PASSWORD, rejectUnauthorized: false })
         });
         res.json({ xml: resp.data });
-    } catch (e) { res.status(500).json({ erro: e.response?.data || e.message }); }
+    } catch (e) {
+        const detalhesErro = e.response?.data ? e.response.data.toString() : e.message;
+        res.status(500).json({ erro: detalhesErro });
+    }
 });
 
 app.listen(process.env.PORT || 10000);
