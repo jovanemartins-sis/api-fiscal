@@ -48,7 +48,7 @@ const CONFIG = {
 };
 
 /* =========================================================
-   CERTIFICADO
+   CERTIFICADO & mTLS BLINDADO
 ========================================================= */
 
 function carregarCertificado() {
@@ -103,13 +103,12 @@ function carregarPfxParaAssinatura() {
 }
 
 function criarHttpsAgent() {
-    const certPath = carregarCertificado();
-    const senha = process.env.CERT_PASSWORD;
-    if (!senha) throw new Error("CERT_PASSWORD não configurada.");
+    // Utiliza as chaves extraídas em PEM, garantindo que o mTLS envie o certificado corretamente para o IIS da SEFAZ
+    const certificado = carregarPfxParaAssinatura();
 
     return new https.Agent({
-        pfx: fs.readFileSync(certPath),
-        passphrase: senha,
+        key: certificado.privateKey,
+        cert: certificado.publicCert,
         rejectUnauthorized: false,
         secureOptions: crypto.constants.SSL_OP_NO_TLSv1 | crypto.constants.SSL_OP_NO_TLSv1_1 | crypto.constants.SSL_OP_NO_TLSv1_3,
         minVersion: "TLSv1.2",
