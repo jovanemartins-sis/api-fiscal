@@ -216,8 +216,8 @@ app.post('/transmitir-nfce', async (req, res) => {
 
         const isProd = process.env.AMBIENTE_PRODUCAO === 'true';
         const urlSefaz = isProd 
-            ? "https://nfce.fazenda.sp.gov.br/nfe-auth/services/NFeAutorizacao4.asmx"
-            : "https://homologacao.nfce.fazenda.sp.gov.br/nfe-auth/services/NFeAutorizacao4.asmx";
+            ? "https://nfce.fazenda.sp.gov.br/ws/NFeAutorizacao4.asmx"
+            : "https://homologacao.nfce.fazenda.sp.gov.br/ws/NFeAutorizacao4.asmx";
 
         const resposta = await axios.post(urlSefaz, soapEnvelope, {
             headers: { 
