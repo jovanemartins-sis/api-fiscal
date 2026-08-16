@@ -38,7 +38,6 @@ function calcularDV(chave43) {
     return (resto < 2) ? "0" : String(11 - resto);
 }
 
-// Provedor para injetar o X509Certificate exigido pela SEFAZ
 function MyKeyInfo(pemCert) {
     this.getKeyInfo = function(key, prefix) {
         const cleanCert = pemCert
@@ -62,10 +61,8 @@ app.post('/emitir-nfce', (req, res) => {
         const chBase = "3526086630454100011165001" + nNFStr + "100000001";
         const chNFe = chBase + calcularDV(chBase);
 
-        // XML ajustado com rigor estrito ao leiaute da NT 2016.002 / MOC 6.0 (NFC-e SP)
         let xmlNFe = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${chNFe}" versao="4.00"><ide><cUF>35</cUF><cNF>00000001</cNF><natOp>VENDAS</natOp><mod>65</mod><serie>1</serie><nNF>${nNF}</nNF><dhEmi>2026-08-16T17:20:00-03:00</dhEmi><tpNF>1</tpNF><idDest>1</idDest><cMunFG>3519608</cMunFG><tpImp>4</tpImp><tpEmis>1</tpEmis><cDV>${chNFe.slice(-1)}</cDV><tpAmb>2</tpAmb><finNFe>1</finNFe><indFinal>1</indFinal><indPres>1</indPres><procEmi>0</procEmi><verProc>1.0</verProc></ide><emit><CNPJ>${EMITENTE.cnpj}</CNPJ><xNome>${EMITENTE.xNome}</xNome><enderEmit><xLgr>RUA XV DE NOVEMBRO</xLgr><nro>100</nro><xBairro>CENTRO</xBairro><cMun>3519608</cMun><xMun>IBITINGA</xMun><UF>SP</UF><CEP>14940000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais><fone>1433420000</fone></enderEmit><IE>${EMITENTE.ie}</IE><CRT>1</CRT></emit><det nItem="1"><prod><cProd>001</cProd><cEAN>SEM GTIN</cEAN><xProd>PRODUTO TESTE</xProd><NCM>21069090</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>1.0000</qCom><vUnCom>10.00</vUnCom><vProd>10.00</vProd><cEANTrib>SEM GTIN</cEANTrib><uTrib>UN</uTrib><qTrib>1.0000</qTrib><vUnTrib>10.00</vUnTrib><indTot>1</indTot></prod><imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS><PIS><PISOutr><CST>99</CST><vBC>0.00</vBC><pPIS>0.00</pPIS><vPIS>0.00</vPIS></PISOutr></PIS><COFINS><COFINSOutr><CST>99</CST><vBC>0.00</vBC><pCOFINS>0.00</pCOFINS><vCOFINS>0.00</vCOFINS></COFINSOutr></COFINS></imposto></det><total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>10.00</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>10.00</vNF><vTotTrib>0.00</vTotTrib></ICMSTot></total><transp><modFrete>9</modFrete></transp><pag><detPag><tPag>01</tPag><vPag>10.00</vPag></detPag></pag><infRespTec><CNPJ>${EMITENTE.cnpj}</CNPJ><xContato>Elaine</xContato><email>suporte@sistema.com</email><fone>14999999999</fone></infRespTec></infNFe></NFe>`;
 
-        // Leitura do PFX
         const pfxData = fs.readFileSync(path.join(__dirname, 'certificado.pfx'));
         const p12Asn1 = forge.asn1.fromDer(pfxData.toString('binary'));
         const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, process.env.CERT_PASSWORD);
@@ -110,6 +107,9 @@ app.post('/emitir-nfce', (req, res) => {
 
         let xmlAssinado = sig.getSignedXml();
         xmlAssinado = xmlAssinado.replace(/xmlns=""/g, '');
+
+        console.log("=== XML ASSINADO GERADO ===");
+        console.log(xmlAssinado);
 
         res.json({ sucesso: true, xmlAssinado, chaveAcesso: chNFe });
     } catch (e) { res.status(500).json({ erro: e.message }); }
