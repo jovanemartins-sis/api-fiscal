@@ -182,7 +182,7 @@ app.post('/emitir-nfce', (req, res) => {
     }
 });
 
-// Rota 2: Transmitir para a SEFAZ-SP com Tratamento de Resposta
+// Rota 2: Transmitir para a SEFAZ-SP com Envelope SOAP Corrigido
 app.post('/transmitir-nfce', async (req, res) => {
     try {
         let { xmlAssinado } = req.body;
@@ -191,7 +191,7 @@ app.post('/transmitir-nfce', async (req, res) => {
             return res.status(400).json({ sucesso: false, erro: "XML assinado não fornecido." });
         }
 
-        // Limpeza de espaços para conformidade com o layout da SEFAZ
+        // Limpeza de espaços para conformidade estrita com o layout da SEFAZ
         xmlAssinado = xmlAssinado.replace(/>\s+</g, '><').trim();
 
         const httpsAgent = new https.Agent({
@@ -201,18 +201,18 @@ app.post('/transmitir-nfce', async (req, res) => {
             secureProtocol: 'TLSv1_2_method'
         });
 
-        const soapEnvelope = `<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:stat="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
-            <soap:Header/>
-            <soap:Body>
-                <stat:nfeDadosMsg>
+        // Envelope SOAP estruturado no padrão exato da SEFAZ-SP (soap12)
+        const soapEnvelope = `<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+            <soap12:Body>
+                <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
                     <enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
                         <idLote>1</idLote>
                         <indSinc>1</indSinc>
                         ${xmlAssinado}
                     </enviNFe>
-                </stat:nfeDadosMsg>
-            </soap:Body>
-        </soap:Envelope>`;
+                </nfeDadosMsg>
+            </soap12:Body>
+        </soap12:Envelope>`;
 
         const isProd = process.env.AMBIENTE_PRODUCAO === 'true';
         const urlSefaz = isProd 
@@ -230,7 +230,6 @@ app.post('/transmitir-nfce', async (req, res) => {
 
         const xmlRetorno = resposta.data;
 
-        // Extração automatizada do cStat e xMotivo do retorno da SEFAZ
         const cStatMatch = xmlRetorno.match(/<cStat>(.*?)<\/cStat>/);
         const xMotivoMatch = xmlRetorno.match(/<xMotivo>(.*?)<\/xMotivo>/);
         
