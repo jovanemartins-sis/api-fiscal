@@ -513,69 +513,71 @@ app.post("/transmitir-nfce", async (req, res) => {
 
         const soap = `
 <soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
-<soap12:Header/>
-<soap12:Body>
-<nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
-<enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
-<idLote>${idLote}</idLote>
-<indSinc>1</indSinc>
-${xmlAssinado}
-</enviNFe>
-</nfeDadosMsg>
-</soap12:Body>
+    <soap12:Header/>
+    <soap12:Body>
+        <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
+            <enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+                <idLote>${idLote}</idLote>
+                <indSinc>1</indSinc>
+                ${xmlAssinado}
+            </enviNFe>
+        </nfeDadosMsg>
+    </soap12:Body>
 </soap12:Envelope>
 `.trim();
 
         const certPath = carregarCertificado();
+        const pfxBuffer = fs.readFileSync(certPath);
 
         const httpsAgent = new https.Agent({
-            pfx: fs.readFileSync(certPath),
+            pfx: pfxBuffer,
             passphrase: process.env.CERT_PASSWORD,
             rejectUnauthorized: false,
             minVersion: "TLSv1.2",
             maxVersion: "TLSv1.2"
         });
 
+        console.log("Enviando lote para a SEFAZ-SP (Homologação)...");
+
         const resposta = await axios.post(CONFIG.urlAutorizacao, soap, {
             httpsAgent,
             timeout: 60000,
             headers: {
-                "Content-Type":
-                    'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote"',
+                "Content-Type": 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote"',
                 "Accept": "application/soap+xml, text/xml, */*"
             },
-            validateStatus: () => true
+            validateStatus: function (status) {
+                return status < 500;
+            }
         });
 
-        const status = resposta.status;
-        const corpo =
-            typeof resposta.data === "string"
-                ? resposta.data
-                : JSON.stringify(resposta.data);
+        console.log("Status HTTP recebido da SEFAZ:", resposta.status);
 
-        if (status < 200 || status >= 300) {
-            return res.status(status).json({
+        if (resposta.status !== 200) {
+            return res.status(resposta.status).json({
                 sucesso: false,
-                status,
-                erro: "SEFAZ retornou HTTP " + status,
-                respostaSefaz: corpo
+                status: resposta.status,
+                erro: `SEFAZ rejeitou a conexão com HTTP ${resposta.status}`,
+                respostaSefaz: resposta.data || "Nenhum detalhe retornado no corpo (HTTP 400 puro de rede/certificado)."
             });
         }
 
         res.json({
             sucesso: true,
-            status,
-            respostaSefaz: corpo,
+            status: resposta.status,
+            respostaSefaz: resposta.data,
             lote: idLote
         });
+
     } catch (erro) {
-        console.error("ERRO TRANSMISSÃO NFC-e:", erro.message);
-        res.status(erro.response?.status || 500).json({
+        console.error("ERRO CRÍTICO NA TRANSMISSÃO:", erro.message);
+        if (erro.code) console.error("Código do Erro de Rede:", erro.code);
+
+        res.status(500).json({
             sucesso: false,
-            status: erro.response?.status || 500,
+            status: 500,
             erro: erro.message,
-            respostaSefaz: erro.response?.data || null,
-            headers: erro.response?.headers || null
+            detalhe: "Verifique se a senha do certificado (CERT_PASSWORD) está correta e se o arquivo PFX é válido."
         });
     }
 });
