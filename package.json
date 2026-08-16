@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "xml-crypto": "^6.0.0",
+    "xmlbuilder": "^15.1.1"
   }
 }
