@@ -64,7 +64,8 @@ function carregarCertificado() {
     return certPath;
 }
 
-function carregarPfx() {
+// Usado para extrair chaves para a Assinatura XML (xml-crypto)
+function carregarPfxParaAssinatura() {
     const certPath = carregarCertificado();
     const senha = process.env.CERT_PASSWORD;
     if (senha === undefined) throw new Error("CERT_PASSWORD não configurada.");
@@ -99,6 +100,21 @@ function carregarPfx() {
     }
 
     return { privateKey, publicCert };
+}
+
+// Usado para criar o agente HTTPS nativo seguro para a SEFAZ (mTLS)
+function criarHttpsAgent() {
+    const certPath = carregarCertificado();
+    const senha = process.env.CERT_PASSWORD;
+    if (!senha) throw new Error("CERT_PASSWORD não configurada.");
+
+    return new https.Agent({
+        pfx: fs.readFileSync(certPath),
+        passphrase: senha,
+        rejectUnauthorized: false,
+        minVersion: "TLSv1.2",
+        maxVersion: "TLSv1.2"
+    });
 }
 
 /* =========================================================
@@ -145,6 +161,36 @@ function gerarChaveAcesso({ cnpj, data, modelo, serie, numero, tpEmis, cNF }) {
 
     const dv = calcularDV(base);
     return base + dv;
+}
+
+/* =========================================================
+   ANALISADOR INTELIGENTE DE RESPOSTA SEFAZ
+========================================================= */
+
+function extrairTagXml(xml, tag) {
+    const regex = new RegExp(`<${tag}[^>]*>(.*?)<\/${tag}>`, "s");
+    const match = xml.match(regex);
+    return match ? match[1].trim() : null;
+}
+
+function analisarRetornoSefaz(xmlResposta) {
+    if (!xmlResposta || typeof xmlResposta !== "string") {
+        return { status: "999", motivo: "Resposta vazia ou inválida da SEFAZ" };
+    }
+
+    const cStat = extrairTagXml(xmlResposta, "cStat");
+    const xMotivo = extrairTagXml(xmlResposta, "xMotivo");
+    const nProt = extrairTagXml(xmlResposta, "nProt");
+    const chNFe = extrairTagXml(xmlResposta, "chNFe");
+
+    return {
+        autorizada: cStat === "100" || cStat === "150",
+        cStat: cStat || "Desconhecido",
+        xMotivo: xMotivo || "Nenhum motivo detalhado retornado",
+        nProt: nProt || null,
+        chNFe: chNFe || null,
+        xmlBruto: xmlResposta
+    };
 }
 
 /* =========================================================
@@ -293,7 +339,7 @@ app.post("/emitir-nfce", (req, res) => {
         const cNF = String(Math.floor(Math.random() * 99999999)).padStart(8, "0");
 
         const nfce = montarXmlNFCe({ numero, dhEmi, cNF });
-        const certificado = carregarPfx();
+        const certificado = carregarPfxParaAssinatura();
         const xmlAssinado = assinarNFe(nfce.xml, certificado.privateKey, certificado.publicCert);
 
         res.json({ sucesso: true, numero, chaveAcesso: nfce.chave, xmlAssinado });
@@ -302,7 +348,6 @@ app.post("/emitir-nfce", (req, res) => {
     }
 });
 
-// TRANSMISSÃO COM SOAP 1.2 CORRETO (Exigido pela SEFAZ)
 app.post("/transmitir-nfce", async (req, res) => {
     try {
         if (!req.body.xmlAssinado) {
@@ -325,14 +370,8 @@ app.post("/transmitir-nfce", async (req, res) => {
     </soap12:Body>
 </soap12:Envelope>`.trim();
 
-        const certificado = carregarPfx();
-        const httpsAgent = new https.Agent({
-            key: certificado.privateKey,
-            cert: certificado.publicCert,
-            rejectUnauthorized: false,
-            minVersion: "TLSv1.2",
-            maxVersion: "TLSv1.2"
-        });
+        // Agente HTTPS com PFX nativo para mTLS perfeito na SEFAZ
+        const httpsAgent = criarHttpsAgent();
 
         const resposta = await axios.post(CONFIG.urlAutorizacao, soap, {
             httpsAgent,
@@ -344,11 +383,13 @@ app.post("/transmitir-nfce", async (req, res) => {
             validateStatus: () => true
         });
 
-        res.status(resposta.status).json({
-            sucesso: resposta.status === 200,
-            status: resposta.status,
-            respostaSefaz: resposta.data,
-            lote: idLote
+        const resultadoSefaz = analisarRetornoSefaz(resposta.data);
+
+        res.status(200).json({
+            sucesso: resultadoSefaz.autorizada,
+            httpStatus: resposta.status,
+            lote: idLote,
+            retornoSefaz: resultadoSefaz
         });
 
     } catch (e) {
