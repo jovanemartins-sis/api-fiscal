@@ -150,7 +150,7 @@ app.post('/emitir-nfce', (req, res) => {
                 <cProd>001</cProd>
                 <cEAN>SEM GTIN</cEAN>
                 <xProd>Produto de Teste Ibitinga</xProd>
-                <NCM>00000000</NCM>
+                <NCM>21069090</NCM>
                 <CFOP>5102</CFOP>
                 <uCom>UN</uCom>
                 <qCom>1.0000</qCom>
