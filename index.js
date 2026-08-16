@@ -119,7 +119,9 @@ app.post('/transmitir-nfce', async (req, res) => {
     try {
         const soap = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4"><enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><idLote>1</idLote><indSinc>1</indSinc>${req.body.xmlAssinado}</enviNFe></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
         const resp = await axios.post("https://homologacao.nfce.fazenda.sp.gov.br/ws/NFeAutorizacao4.asmx", soap, {
-            headers: { 'Content-Type': 'application/soap+xml; charset=utf-8' },
+            headers: { 
+                'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote"' 
+            },
             httpsAgent: new https.Agent({ pfx: fs.readFileSync(path.join(__dirname, 'certificado.pfx')), passphrase: process.env.CERT_PASSWORD, rejectUnauthorized: false })
         });
         res.json({ xml: resp.data });
