@@ -1,134 +1,848 @@
-const express = require('express');
-const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
-const { SignedXml } = require('xml-crypto');
-const forge = require('node-forge');
-const axios = require('axios');
-const https = require('https');
+const express = require("express");
+const cors = require("cors");
+const fs = require("fs");
+const path = require("path");
+const axios = require("axios");
+const https = require("https");
+const forge = require("node-forge");
+const { SignedXml } = require("xml-crypto");
 
 const app = express();
-app.use(express.json({ limit: '5mb' }));
-app.use(cors());
 
-// --- CONFIGURAÇÃO ---
+app.use(cors());
+app.use(express.json({ limit: "10mb" }));
+app.use(express.static(path.join(__dirname, "public")));
+
+const PORT = process.env.PORT || 10000;
+
+/* =========================================================
+   CONFIGURAÇÃO
+========================================================= */
+
 const EMITENTE = {
     cnpj: "66304541000111",
     xNome: "66.304.541 ELAINE CRISTINA DE CAMARGO DE SOUZA",
-    ie: "344275522110"
+    ie: "344275522110",
+
+    endereco: {
+        xLgr: "RUA XV DE NOVEMBRO",
+        nro: "100",
+        xBairro: "CENTRO",
+        cMun: "3519608",
+        xMun: "IBITINGA",
+        UF: "SP",
+        CEP: "14940000",
+        cPais: "1058",
+        xPais: "BRASIL",
+        fone: "1433420000"
+    }
 };
 
-// --- FUNÇÕES AUXILIARES ---
+const CONFIG = {
+    uf: "35",
+    municipio: "3519608",
+    serie: 1,
+
+    // 2 = homologação
+    ambiente: 2,
+
+    modelo: "65",
+
+    // homologação SEFAZ-SP
+    urlAutorizacao:
+        "https://homologacao.nfce.fazenda.sp.gov.br/ws/NFeAutorizacao4.asmx"
+};
+
+/* =========================================================
+   CERTIFICADO
+========================================================= */
+
 function carregarCertificado() {
-    if (!process.env.CERT_BASE64) return null;
-    const certBuffer = Buffer.from(process.env.CERT_BASE64.replace(/\s/g, ''), 'base64');
-    const certPath = path.join(__dirname, 'certificado.pfx');
-    fs.writeFileSync(certPath, certBuffer);
+
+    const certPath = path.join(__dirname, "certificado.pfx");
+
+    if (fs.existsSync(certPath)) {
+        return certPath;
+    }
+
+    if (!process.env.CERT_BASE64) {
+        throw new Error(
+            "Certificado não encontrado. Coloque certificado.pfx ou configure CERT_BASE64."
+        );
+    }
+
+    const base64 = process.env.CERT_BASE64.replace(/\s/g, "");
+
+    const buffer = Buffer.from(base64, "base64");
+
+    fs.writeFileSync(certPath, buffer);
+
     return certPath;
 }
-carregarCertificado();
 
-function calcularDV(chave43) {
-    let soma = 0, peso = 2;
-    for (let i = chave43.length - 1; i >= 0; i--) {
-        soma += parseInt(chave43.charAt(i)) * peso;
-        peso = (peso === 9) ? 2 : peso + 1;
-    }
-    let resto = soma % 11;
-    return (resto < 2) ? "0" : String(11 - resto);
+/* =========================================================
+   UTILITÁRIOS
+========================================================= */
+
+function somenteNumeros(valor) {
+    return String(valor || "").replace(/\D/g, "");
 }
 
-function MyKeyInfo(pemCert) {
-    this.getKeyInfo = function(key, prefix) {
-        const cleanCert = pemCert
-            .replace(/-----BEGIN CERTIFICATE-----/g, '')
-            .replace(/-----END CERTIFICATE-----/g, '')
-            .replace(/\r?\n|\r/g, '');
-        return `<ds:X509Data><ds:X509Certificate>${cleanCert}</ds:X509Certificate></ds:X509Data>`;
+function calcularDV(chave43) {
+
+    let soma = 0;
+    let peso = 2;
+
+    for (let i = chave43.length - 1; i >= 0; i--) {
+
+        soma += Number(chave43[i]) * peso;
+
+        peso++;
+
+        if (peso > 9) {
+            peso = 2;
+        }
+    }
+
+    const resto = soma % 11;
+
+    return resto === 0 || resto === 1
+        ? 0
+        : 11 - resto;
+}
+
+function dataHoraSaoPaulo() {
+
+    const agora = new Date();
+
+    const partes = new Intl.DateTimeFormat("sv-SE", {
+        timeZone: "America/Sao_Paulo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false
+    }).formatToParts(agora);
+
+    const obj = {};
+
+    for (const p of partes) {
+        obj[p.type] = p.value;
+    }
+
+    return `${obj.year}-${obj.month}-${obj.day}T${obj.hour}:${obj.minute}:${obj.second}-03:00`;
+}
+
+function gerarNumeroNota() {
+
+    return Math.floor(Math.random() * 999999999) + 1;
+}
+
+function gerarCodigoNumerico() {
+
+    return String(
+        Math.floor(Math.random() * 99999999)
+    ).padStart(8, "0");
+}
+
+/* =========================================================
+   CHAVE DE ACESSO NFC-e
+========================================================= */
+
+function gerarChaveAcesso({
+    cnpj,
+    data,
+    modelo,
+    serie,
+    numero,
+    tpEmis,
+    cNF
+}) {
+
+    const aamm = data.substring(2, 4) + data.substring(5, 7);
+
+    const base =
+        String(CONFIG.uf).padStart(2, "0") +
+        aamm +
+        somenteNumeros(cnpj).padStart(14, "0") +
+        String(modelo).padStart(2, "0") +
+        String(serie).padStart(3, "0") +
+        String(numero).padStart(9, "0") +
+        String(tpEmis).padStart(1, "0") +
+        String(cNF).padStart(8, "0");
+
+    if (base.length !== 43) {
+        throw new Error(
+            `Chave inválida: base possui ${base.length} dígitos em vez de 43.`
+        );
+    }
+
+    const dv = calcularDV(base);
+
+    return base + dv;
+}
+
+/* =========================================================
+   CERTIFICADO / PFX
+========================================================= */
+
+function carregarPfx() {
+
+    const certPath = carregarCertificado();
+
+    const senha = process.env.CERT_PASSWORD;
+
+    if (senha === undefined) {
+        throw new Error("CERT_PASSWORD não configurada.");
+    }
+
+    const pfxData = fs.readFileSync(certPath);
+
+    const p12Asn1 = forge.asn1.fromDer(
+        pfxData.toString("binary")
+    );
+
+    const p12 = forge.pkcs12.pkcs12FromAsn1(
+        p12Asn1,
+        senha
+    );
+
+    let privateKey = null;
+    let publicCert = null;
+
+    const certBags = p12.getBags({
+        bagType: forge.pki.oids.certBag
+    });
+
+    const certificados =
+        certBags[forge.pki.oids.certBag] || [];
+
+    if (certificados.length > 0 && certificados[0].cert) {
+
+        publicCert = forge.pki.certificateToPem(
+            certificados[0].cert
+        );
+    }
+
+    const keyBagTypes = [
+        forge.pki.oids.pkcs8ShroudedKeyBag,
+        forge.pki.oids.keyBag
+    ];
+
+    for (const bagType of keyBagTypes) {
+
+        if (privateKey) break;
+
+        try {
+
+            const bags = p12.getBags({
+                bagType
+            });
+
+            const lista = bags[bagType] || [];
+
+            if (lista.length > 0 && lista[0].key) {
+
+                privateKey =
+                    forge.pki.privateKeyToPem(
+                        lista[0].key
+                    );
+            }
+
+        } catch (erro) {
+            // tenta próximo tipo
+        }
+    }
+
+    if (!privateKey) {
+        throw new Error(
+            "Chave privada não encontrada no certificado PFX."
+        );
+    }
+
+    if (!publicCert) {
+        throw new Error(
+            "Certificado público não encontrado no PFX."
+        );
+    }
+
+    return {
+        privateKey,
+        publicCert,
+        certPath
     };
-    this.getKey = function(keyInfo) {
+}
+
+/* =========================================================
+   KEY INFO XMLDSIG
+========================================================= */
+
+function MyKeyInfo(pemCert) {
+
+    this.getKeyInfo = function () {
+
+        const cleanCert = pemCert
+            .replace(/-----BEGIN CERTIFICATE-----/g, "")
+            .replace(/-----END CERTIFICATE-----/g, "")
+            .replace(/\r?\n|\r/g, "");
+
+        return (
+            `<ds:X509Data>` +
+            `<ds:X509Certificate>${cleanCert}</ds:X509Certificate>` +
+            `</ds:X509Data>`
+        );
+    };
+
+    this.getKey = function () {
         return null;
     };
 }
 
-// --- ROTAS ---
-app.get('/', (req, res) => res.json({ status: "API Ativa" }));
+/* =========================================================
+   ASSINATURA
+========================================================= */
 
-app.post('/emitir-nfce', (req, res) => {
-    try {
-        const nNF = Math.floor(Math.random() * 999999) + 1;
-        const nNFStr = String(nNF).padStart(9, '0');
-        const chBase = "3526086630454100011165001" + nNFStr + "100000001";
-        const chNFe = chBase + calcularDV(chBase);
+function assinarNFe(xmlNFe, privateKey, publicCert) {
 
-        let xmlNFe = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${chNFe}" versao="4.00"><ide><cUF>35</cUF><cNF>00000001</cNF><natOp>VENDAS</natOp><mod>65</mod><serie>1</serie><nNF>${nNF}</nNF><dhEmi>2026-08-16T17:20:00-03:00</dhEmi><tpNF>1</tpNF><idDest>1</idDest><cMunFG>3519608</cMunFG><tpImp>4</tpImp><tpEmis>1</tpEmis><cDV>${chNFe.slice(-1)}</cDV><tpAmb>2</tpAmb><finNFe>1</finNFe><indFinal>1</indFinal><indPres>1</indPres><procEmi>0</procEmi><verProc>1.0</verProc></ide><emit><CNPJ>${EMITENTE.cnpj}</CNPJ><xNome>${EMITENTE.xNome}</xNome><enderEmit><xLgr>RUA XV DE NOVEMBRO</xLgr><nro>100</nro><xBairro>CENTRO</xBairro><cMun>3519608</cMun><xMun>IBITINGA</xMun><UF>SP</UF><CEP>14940000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais><fone>1433420000</fone></enderEmit><IE>${EMITENTE.ie}</IE><CRT>1</CRT></emit><det nItem="1"><prod><cProd>001</cProd><cEAN>SEM GTIN</cEAN><xProd>PRODUTO TESTE</xProd><NCM>21069090</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>1.0000</qCom><vUnCom>10.00</vUnCom><vProd>10.00</vProd><cEANTrib>SEM GTIN</cEANTrib><uTrib>UN</uTrib><qTrib>1.0000</qTrib><vUnTrib>10.00</vUnTrib><indTot>1</indTot></prod><imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS><PIS><PISOutr><CST>99</CST><vBC>0.00</vBC><pPIS>0.00</pPIS><vPIS>0.00</vPIS></PISOutr></PIS><COFINS><COFINSOutr><CST>99</CST><vBC>0.00</vBC><pCOFINS>0.00</pCOFINS><vCOFINS>0.00</vCOFINS></COFINSOutr></COFINS></imposto></det><total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>10.00</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>10.00</vNF><vTotTrib>0.00</vTotTrib></ICMSTot></total><transp><modFrete>9</modFrete></transp><pag><detPag><tPag>01</tPag><vPag>10.00</vPag></detPag></pag><infRespTec><CNPJ>${EMITENTE.cnpj}</CNPJ><xContato>Elaine</xContato><email>suporte@sistema.com</email><fone>14999999999</fone></infRespTec></infNFe></NFe>`;
+    const sig = new SignedXml();
 
-        const pfxData = fs.readFileSync(path.join(__dirname, 'certificado.pfx'));
-        const p12Asn1 = forge.asn1.fromDer(pfxData.toString('binary'));
-        const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, process.env.CERT_PASSWORD);
-        
-        let privateKey = null;
-        let publicCert = null;
+    sig.prefix = "ds";
 
-        const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
-        if (certBags[forge.pki.oids.certBag]?.[0]?.cert) {
-            publicCert = forge.pki.certificateToPem(certBags[forge.pki.oids.certBag][0].cert);
+    sig.keyInfoProvider =
+        new MyKeyInfo(publicCert);
+
+    sig.signingKey = privateKey;
+
+    sig.addReference(
+        "//*[local-name()='infNFe']",
+        [
+            "http://www.w3.org/2000/09/xmldsig#enveloped-signature",
+            "http://www.w3.org/2001/10/xml-exc-c14n#"
+        ],
+        "http://www.w3.org/2001/04/xmlenc#sha256"
+    );
+
+    sig.computeSignature(xmlNFe, {
+        location: {
+            reference:
+                "//*[local-name()='infNFe']",
+            action: "after"
         }
+    });
 
-        try {
-            const bags = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
-            if (bags[forge.pki.oids.pkcs8ShroudedKeyBag]?.[0]?.key) {
-                privateKey = forge.pki.privateKeyToPem(bags[forge.pki.oids.pkcs8ShroudedKeyBag][0].key);
-            }
-        } catch (e) {}
+    return sig.getSignedXml();
+}
 
-        if (!privateKey) {
-            try {
-                const bags = p12.getBags({ bagType: forge.pki.oids.keyBag });
-                if (bags[forge.pki.oids.keyBag]?.[0]?.key) {
-                    privateKey = forge.pki.privateKeyToPem(bags[forge.pki.oids.keyBag][0].key);
-                }
-            } catch (e) {}
-        }
+/* =========================================================
+   XML NFC-e
+========================================================= */
 
-        if (!privateKey || !publicCert) {
-            return res.status(500).json({ sucesso: false, erro: "Chave privada ou certificado público não encontrados no PFX." });
-        }
+function montarXmlNFCe(dados) {
 
-        const sig = new SignedXml();
-        sig.prefix = "ds";
-        sig.keyInfoProvider = new MyKeyInfo(publicCert);
-        sig.addReference(
-            "//*[local-name()='infNFe']", 
-            [
-                "http://www.w3.org/2000/09/xmldsig#enveloped-signature", 
-                "http://www.w3.org/2001/10/xml-exc-c14n#"
-            ], 
-            "http://www.w3.org/2001/04/xmlenc#sha256"
-        );
-        sig.signingKey = privateKey;
-        sig.computeSignature(xmlNFe);
+    const numero = dados.numero;
+    const serie = CONFIG.serie;
 
-        const xmlAssinado = sig.getSignedXml();
+    const dataHora = dados.dhEmi;
 
-        res.json({ sucesso: true, xmlAssinado, chaveAcesso: chNFe });
-    } catch (e) { res.status(500).json({ erro: e.message }); }
+    const cNF = dados.cNF;
+
+    const tpEmis = 1;
+
+    const chave = gerarChaveAcesso({
+        cnpj: EMITENTE.cnpj,
+        data: dataHora,
+        modelo: 65,
+        serie,
+        numero,
+        tpEmis,
+        cNF
+    });
+
+    const dv = chave.slice(-1);
+
+    const produto = dados.produto || {
+        codigo: "001",
+        descricao: "PRODUTO TESTE",
+        ncm: "21069090",
+        cfop: "5102",
+        unidade: "UN",
+        quantidade: 1,
+        valorUnitario: 10
+    };
+
+    const quantidade =
+        Number(produto.quantidade || 1);
+
+    const valorUnitario =
+        Number(produto.valorUnitario || 0);
+
+    const valorProduto =
+        quantidade * valorUnitario;
+
+    const valorFormatado =
+        valorProduto.toFixed(2);
+
+    const xml = `
+<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+<infNFe Id="NFe${chave}" versao="4.00">
+
+<ide>
+<cUF>${CONFIG.uf}</cUF>
+<cNF>${cNF}</cNF>
+<natOp>VENDA</natOp>
+<mod>65</mod>
+<serie>${serie}</serie>
+<nNF>${numero}</nNF>
+<dhEmi>${dataHora}</dhEmi>
+<tpNF>1</tpNF>
+<idDest>1</idDest>
+<cMunFG>${CONFIG.municipio}</cMunFG>
+<tpImp>4</tpImp>
+<tpEmis>${tpEmis}</tpEmis>
+<cDV>${dv}</cDV>
+<tpAmb>${CONFIG.ambiente}</tpAmb>
+<finNFe>1</finNFe>
+<indFinal>1</indFinal>
+<indPres>1</indPres>
+<procEmi>0</procEmi>
+<verProc>1.0.0</verProc>
+</ide>
+
+<emit>
+
+<CNPJ>${EMITENTE.cnpj}</CNPJ>
+
+<xNome>${EMITENTE.xNome}</xNome>
+
+<enderEmit>
+<xLgr>${EMITENTE.endereco.xLgr}</xLgr>
+<nro>${EMITENTE.endereco.nro}</nro>
+<xBairro>${EMITENTE.endereco.xBairro}</xBairro>
+<cMun>${EMITENTE.endereco.cMun}</cMun>
+<xMun>${EMITENTE.endereco.xMun}</xMun>
+<UF>${EMITENTE.endereco.UF}</UF>
+<CEP>${EMITENTE.endereco.CEP}</CEP>
+<cPais>${EMITENTE.endereco.cPais}</cPais>
+<xPais>${EMITENTE.endereco.xPais}</xPais>
+<fone>${EMITENTE.endereco.fone}</fone>
+</enderEmit>
+
+<IE>${EMITENTE.ie}</IE>
+<CRT>1</CRT>
+
+</emit>
+
+<det nItem="1">
+
+<prod>
+
+<cProd>${produto.codigo}</cProd>
+<cEAN>SEM GTIN</cEAN>
+<xProd>${produto.descricao}</xProd>
+<NCM>${produto.ncm}</NCM>
+<CFOP>${produto.cfop}</CFOP>
+
+<uCom>${produto.unidade}</uCom>
+
+<qCom>${quantidade.toFixed(4)}</qCom>
+
+<vUnCom>${valorUnitario.toFixed(10)}</vUnCom>
+
+<vProd>${valorFormatado}</vProd>
+
+<cEANTrib>SEM GTIN</cEANTrib>
+
+<uTrib>${produto.unidade}</uTrib>
+
+<qTrib>${quantidade.toFixed(4)}</qTrib>
+
+<vUnTrib>${valorUnitario.toFixed(10)}</vUnTrib>
+
+<indTot>1</indTot>
+
+</prod>
+
+<imposto>
+
+<ICMS>
+
+<ICMSSN102>
+<orig>0</orig>
+<CSOSN>102</CSOSN>
+</ICMSSN102>
+
+</ICMS>
+
+<PIS>
+
+<PISOutr>
+<CST>99</CST>
+<vBC>0.00</vBC>
+<pPIS>0.00</pPIS>
+<vPIS>0.00</vPIS>
+</PISOutr>
+
+</PIS>
+
+<COFINS>
+
+<COFINSOutr>
+<CST>99</CST>
+<vBC>0.00</vBC>
+<pCOFINS>0.00</pCOFINS>
+<vCOFINS>0.00</vCOFINS>
+</COFINSOutr>
+
+</COFINS>
+
+</imposto>
+
+</det>
+
+<total>
+
+<ICMSTot>
+
+<vBC>0.00</vBC>
+<vICMS>0.00</vICMS>
+<vICMSDeson>0.00</vICMSDeson>
+<vFCP>0.00</vFCP>
+<vBCST>0.00</vBCST>
+<vST>0.00</vST>
+<vFCPST>0.00</vFCPST>
+<vFCPSTRet>0.00</vFCPSTRet>
+
+<vProd>${valorFormatado}</vProd>
+
+<vFrete>0.00</vFrete>
+<vSeg>0.00</vSeg>
+<vDesc>0.00</vDesc>
+<vII>0.00</vII>
+<vIPI>0.00</vIPI>
+<vIPIDevol>0.00</vIPIDevol>
+<vPIS>0.00</vPIS>
+<vCOFINS>0.00</vCOFINS>
+<vOutro>0.00</vOutro>
+
+<vNF>${valorFormatado}</vNF>
+
+<vTotTrib>0.00</vTotTrib>
+
+</ICMSTot>
+
+</total>
+
+<transp>
+<modFrete>9</modFrete>
+</transp>
+
+<pag>
+
+<detPag>
+
+<tPag>01</tPag>
+
+<vPag>${valorFormatado}</vPag>
+
+</detPag>
+
+</pag>
+
+<infRespTec>
+
+<CNPJ>${EMITENTE.cnpj}</CNPJ>
+<xContato>Elaine</xContato>
+<email>suporte@sistema.com</email>
+<fone>14999999999</fone>
+
+</infRespTec>
+
+</infNFe>
+
+</NFe>
+`.trim();
+
+    return {
+        xml,
+        chave
+    };
+}
+
+/* =========================================================
+   ROTA INICIAL
+========================================================= */
+
+app.get("/", (req, res) => {
+
+    res.json({
+        sistema: "ERP NFC-e",
+        status: "API Ativa",
+        ambiente:
+            CONFIG.ambiente === 2
+                ? "HOMOLOGAÇÃO"
+                : "PRODUÇÃO",
+        sefaz:
+            CONFIG.urlAutorizacao
+    });
 });
 
-app.post('/transmitir-nfce', async (req, res) => {
+/* =========================================================
+   EMITIR NFC-e
+========================================================= */
+
+app.post("/emitir-nfce", (req, res) => {
+
     try {
-        const soap = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4"><enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><idLote>1</idLote><indSinc>1</indSinc>${req.body.xmlAssinado}</enviNFe></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
-        const resp = await axios.post("https://homologacao.nfce.fazenda.sp.gov.br/ws/NFeAutorizacao4.asmx", soap, {
-            headers: { 
-                'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote"' 
-            },
-            httpsAgent: new https.Agent({ pfx: fs.readFileSync(path.join(__dirname, 'certificado.pfx')), passphrase: process.env.CERT_PASSWORD, rejectUnauthorized: false })
+
+        const numero =
+            Number(req.body.numero) ||
+            gerarNumeroNota();
+
+        const dhEmi =
+            dataHoraSaoPaulo();
+
+        const cNF =
+            gerarCodigoNumerico();
+
+        const dados = {
+            numero,
+            dhEmi,
+            cNF,
+            produto: req.body.produto
+        };
+
+        const nfce =
+            montarXmlNFCe(dados);
+
+        const certificado =
+            carregarPfx();
+
+        const xmlAssinado =
+            assinarNFe(
+                nfce.xml,
+                certificado.privateKey,
+                certificado.publicCert
+            );
+
+        res.json({
+            sucesso: true,
+            ambiente: CONFIG.ambiente,
+            numero,
+            serie: CONFIG.serie,
+            chaveAcesso: nfce.chave,
+            xmlAssinado
         });
-        res.json({ xml: resp.data });
-    } catch (e) {
-        const detalhesErro = e.response?.data ? e.response.data.toString() : e.message;
-        res.status(500).json({ erro: detalhesErro });
+
+    } catch (erro) {
+
+        console.error(
+            "ERRO EMITIR:",
+            erro
+        );
+
+        res.status(500).json({
+            sucesso: false,
+            erro: erro.message
+        });
     }
 });
 
-app.listen(process.env.PORT || 10000);
+/* =========================================================
+   TRANSMITIR NFC-e
+========================================================= */
+
+app.post("/transmitir-nfce", async (req, res) => {
+
+    try {
+
+        if (!req.body.xmlAssinado) {
+
+            return res.status(400).json({
+                sucesso: false,
+                erro:
+                    "xmlAssinado não foi informado."
+            });
+        }
+
+        const xmlAssinado =
+            req.body.xmlAssinado;
+
+        const idLote =
+            String(
+                Date.now()
+            ).slice(-15);
+
+        const soap = `
+<soap12:Envelope
+xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+
+<soap12:Header/>
+
+<soap12:Body>
+
+<nfeDadosMsg
+xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
+
+<enviNFe
+xmlns="http://www.portalfiscal.inf.br/nfe"
+versao="4.00">
+
+<idLote>${idLote}</idLote>
+
+<indSinc>1</indSinc>
+
+${xmlAssinado}
+
+</enviNFe>
+
+</nfeDadosMsg>
+
+</soap12:Body>
+
+</soap12:Envelope>
+`.trim();
+
+        const certPath =
+            carregarCertificado();
+
+        const httpsAgent =
+            new https.Agent({
+                pfx:
+                    fs.readFileSync(
+                        certPath
+                    ),
+                passphrase:
+                    process.env.CERT_PASSWORD,
+                minVersion: 'TLSv1.2',
+                maxVersion: 'TLSv1.2',
+                rejectUnauthorized: false
+            });
+
+        const resposta =
+            await axios.post(
+                CONFIG.urlAutorizacao,
+                soap,
+                {
+                    httpsAgent,
+                    timeout: 60000,
+                    headers: {
+                        "Content-Type": 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote"',
+                        "Accept": "application/soap+xml, text/xml, */*"
+                    },
+                    validateStatus: () => true
+                }
+            );
+
+        const status =
+            resposta.status;
+
+        const corpo =
+            typeof resposta.data === "string"
+                ? resposta.data
+                : JSON.stringify(
+                    resposta.data
+                );
+
+        if (status < 200 || status >= 300) {
+
+            return res.status(status).json({
+
+                sucesso: false,
+
+                status,
+
+                erro:
+                    "SEFAZ retornou HTTP " +
+                    status,
+
+                respostaSefaz:
+                    corpo
+            });
+        }
+
+        res.json({
+
+            sucesso: true,
+
+            status,
+
+            respostaSefaz:
+                corpo,
+
+            lote:
+                idLote
+        });
+
+    } catch (erro) {
+
+        res.status(
+            erro.response?.status || 500
+        ).json({
+
+            sucesso: false,
+
+            status:
+                erro.response?.status || 500,
+
+            erro:
+                erro.message,
+
+            respostaSefaz:
+                erro.response?.data || null,
+
+            headers:
+                erro.response?.headers || null
+        });
+    }
+});
+
+/* =========================================================
+   TESTE DO CERTIFICADO
+========================================================= */
+
+app.get("/testar-certificado", (req, res) => {
+
+    try {
+
+        const certificado =
+            carregarPfx();
+
+        res.json({
+
+            sucesso: true,
+
+            mensagem:
+                "Certificado PFX carregado corretamente.",
+
+            certificado:
+                Boolean(
+                    certificado.publicCert
+                ),
+
+            chavePrivada:
+                Boolean(
+                    certificado.privateKey
+                )
+        });
+
+    } catch (erro) {
+
+        res.status(500).json({
+
+            sucesso: false,
+
+            erro:
+                erro.message
+        });
+    }
+});
+
+/* =========================================================
+   INICIAR
+========================================================= */
+
+app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+});
