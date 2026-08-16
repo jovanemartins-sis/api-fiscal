@@ -44,7 +44,7 @@ function MyKeyInfo(pemCert) {
             .replace(/-----BEGIN CERTIFICATE-----/g, '')
             .replace(/-----END CERTIFICATE-----/g, '')
             .replace(/\r?\n|\r/g, '');
-        return `<X509Data><X509Certificate>${cleanCert}</X509Certificate></X509Data>`;
+        return `<ds:X509Data><ds:X509Certificate>${cleanCert}</ds:X509Certificate></ds:X509Data>`;
     };
     this.getKey = function(keyInfo) {
         return null;
@@ -96,20 +96,20 @@ app.post('/emitir-nfce', (req, res) => {
         }
 
         const sig = new SignedXml();
+        sig.prefix = "ds";
         sig.keyInfoProvider = new MyKeyInfo(publicCert);
         sig.addReference(
             "//*[local-name()='infNFe']", 
-            ["http://www.w3.org/2000/09/xmldsig#enveloped-signature", "http://www.w3.org/2001/10/xml-exc-c14n#"], 
+            [
+                "http://www.w3.org/2000/09/xmldsig#enveloped-signature", 
+                "http://www.w3.org/2001/10/xml-exc-c14n#"
+            ], 
             "http://www.w3.org/2001/04/xmlenc#sha256"
         );
         sig.signingKey = privateKey;
         sig.computeSignature(xmlNFe);
 
-        let xmlAssinado = sig.getSignedXml();
-        xmlAssinado = xmlAssinado.replace(/xmlns=""/g, '');
-
-        console.log("=== XML ASSINADO GERADO ===");
-        console.log(xmlAssinado);
+        const xmlAssinado = sig.getSignedXml();
 
         res.json({ sucesso: true, xmlAssinado, chaveAcesso: chNFe });
     } catch (e) { res.status(500).json({ erro: e.message }); }
