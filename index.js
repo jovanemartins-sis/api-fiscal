@@ -182,11 +182,14 @@ app.post('/emitir-nfce', (req, res) => {
 // Rota 2: Transmitir para a SEFAZ-SP (Homologação)
 app.post('/transmitir-nfce', async (req, res) => {
     try {
-        const { xmlAssinado } = req.body;
+        let { xmlAssinado } = req.body;
 
         if (!xmlAssinado) {
             return res.status(400).json({ sucesso: false, erro: "XML assinado não fornecido." });
         }
+
+        // Limpeza de espaços excedentes e quebras de linha para evitar erro de formatação na SEFAZ
+        xmlAssinado = xmlAssinado.replace(/>\s+</g, '><').trim();
 
         const httpsAgent = new https.Agent({
             pfx: fs.readFileSync(path.join(__dirname, 'certificado.pfx')),
@@ -194,11 +197,16 @@ app.post('/transmitir-nfce', async (req, res) => {
             rejectUnauthorized: false
         });
 
-        const soapEnvelope = `<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
+        const soapEnvelope = `<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:stat="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
+            <soap:Header/>
             <soap:Body>
-                <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
-                    ${xmlAssinado}
-                </nfeDadosMsg>
+                <stat:nfeDadosMsg>
+                    <enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+                        <idLote>1</idLote>
+                        <indSinc>1</indSinc>
+                        ${xmlAssinado}
+                    </enviNFe>
+                </stat:nfeDadosMsg>
             </soap:Body>
         </soap:Envelope>`;
 
@@ -211,19 +219,20 @@ app.post('/transmitir-nfce', async (req, res) => {
                     'SOAPAction': 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote'
                 },
                 httpsAgent,
-                timeout: 15000
+                timeout: 20000
             }
         );
 
         res.json({
             sucesso: true,
-            mensagem: "XML transmitido com sucesso!",
+            mensagem: "Requisição processada pela SEFAZ!",
             retornoSefaz: resposta.data
         });
 
     } catch (erro) {
-        console.error("Erro na transmissão SEFAZ:", erro.response ? erro.response.data : erro.message);
-        res.status(500).json({ sucesso: false, erro: erro.message });
+        const detalheErro = erro.response ? erro.response.data : erro.message;
+        console.error("Erro na transmissão SEFAZ:", detalheErro);
+        res.status(500).json({ sucesso: false, erro: detalheErro });
     }
 });
 
