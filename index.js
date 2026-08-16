@@ -214,6 +214,12 @@ app.post('/emitir-nfce', (req, res) => {
                 <vPag>150.00</vPag>
             </detPag>
         </pag>
+        <infRespTec>
+            <CNPJ>${EMITENTE.cnpj}</CNPJ>
+            <xContato>Elaine Cristina</xContato>
+            <email>suporte@ibitinga.com</email>
+            <fone>14999999999</fone>
+        </infRespTec>
     </infNFe>
 </NFe>`;
 
