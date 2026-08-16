@@ -496,7 +496,7 @@ app.post("/emitir-nfce", (req, res) => {
 });
 
 /* =========================================================
-   TRANSMITIR NFC-e (SOAP 1.2)
+   TRANSMITIR NFC-e (SOAP 1.2 - Ajustado)
 ========================================================= */
 
 app.post("/transmitir-nfce", async (req, res) => {
@@ -545,7 +545,7 @@ app.post("/transmitir-nfce", async (req, res) => {
                 "Accept": "application/soap+xml, text/xml, */*"
             },
             validateStatus: function (status) {
-                return status < 500;
+                return true;
             }
         });
 
