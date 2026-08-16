@@ -51,24 +51,30 @@ app.post('/emitir-nfce', (req, res) => {
         // XML Minificado para evitar falha de schema
         let xmlNFe = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${chNFe}" versao="4.00"><ide><cUF>35</cUF><cNF>00000001</cNF><natOp>VENDAS</natOp><mod>65</mod><serie>1</serie><nNF>${nNF}</nNF><dhEmi>2026-08-16T17:20:00-03:00</dhEmi><tpNF>1</tpNF><idDest>1</idDest><cMunFG>3519608</cMunFG><tpImp>4</tpImp><tpEmis>1</tpEmis><cDV>${chNFe.slice(-1)}</cDV><tpAmb>2</tpAmb><finNFe>1</finNFe><indFinal>1</indFinal><indPres>1</indPres><procEmi>0</procEmi><verProc>1.0</verProc></ide><emit><CNPJ>${EMITENTE.cnpj}</CNPJ><xNome>${EMITENTE.xNome}</xNome><enderEmit><xLgr>Rua Exemplo</xLgr><nro>123</nro><xBairro>Centro</xBairro><cMun>3519608</cMun><xMun>Ibitinga</xMun><UF>SP</UF><CEP>14940000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></enderEmit><IE>${EMITENTE.ie}</IE><CRT>1</CRT></emit><det nItem="1"><prod><cProd>001</cProd><cEAN>SEM GTIN</cEAN><xProd>TESTE</xProd><NCM>21069090</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>1.0000</qCom><vUnCom>10.00</vUnCom><vProd>10.00</vProd><cEANTrib>SEM GTIN</cEANTrib><uTrib>UN</uTrib><qTrib>1.0000</qTrib><vUnTrib>10.00</vUnTrib><indTot>1</indTot></prod><imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS><PIS><PISNT><CST>07</CST></PISNT></PIS><COFINS><COFINSNT><CST>07</CST></COFINSNT></COFINS></imposto></det><total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>10.00</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>10.00</vNF><vTotTrib>0.00</vTotTrib></ICMSTot></total><transp><modFrete>9</modFrete></transp><pag><detPag><tPag>01</tPag><vPag>10.00</vPag></detPag></pag><infRespTec><CNPJ>${EMITENTE.cnpj}</CNPJ><xContato>Elaine</xContato><email>a@a.com</email><fone>14999999999</fone></infRespTec></infNFe></NFe>`;
 
-        // Leitura segura e dinâmica da chave privada do PFX
+        // Leitura otimizada e blindada da chave privada do PFX
         const pfxData = fs.readFileSync(path.join(__dirname, 'certificado.pfx'));
         const p12Asn1 = forge.asn1.fromDer(pfxData.toString('binary'));
         const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, process.env.CERT_PASSWORD);
         
         let privateKey = null;
-        const bags = p12.getBags();
-        for (const bagType in bags) {
-            const bagList = bags[bagType];
-            if (bagList && bagList.length > 0) {
-                for (const item of bagList) {
-                    if (item.key) {
-                        privateKey = forge.pki.privateKeyToPem(item.key);
-                        break;
-                    }
-                }
+        try {
+            const bags = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
+            if (bags[forge.pki.oids.pkcs8ShroudedKeyBag] && bags[forge.pki.oids.pkcs8ShroudedKeyBag].length > 0) {
+                privateKey = forge.pki.privateKeyToPem(bags[forge.pki.oids.pkcs8ShroudedKeyBag][0].key);
             }
-            if (privateKey) break;
+        } catch (err) {
+            // Ignora e tenta o próximo formato se houver falha
+        }
+
+        if (!privateKey) {
+            try {
+                const bags = p12.getBags({ bagType: forge.pki.oids.keyBag });
+                if (bags[forge.pki.oids.keyBag] && bags[forge.pki.oids.keyBag].length > 0) {
+                    privateKey = forge.pki.privateKeyToPem(bags[forge.pki.oids.keyBag][0].key);
+                }
+            } catch (err) {
+                // Ignora
+            }
         }
 
         if (!privateKey) {
