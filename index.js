@@ -11,7 +11,7 @@ const app = express();
 app.use(express.json({ limit: '5mb' }));
 app.use(cors());
 
-// Configurações do Emitente
+// Configurações do Emitente (Dados de Ibitinga - SP)
 const EMITENTE = {
     cnpj: "66304541000111",
     xNome: "66.304.541 ELAINE CRISTINA DE CAMARGO DE SOUZA",
@@ -31,16 +31,16 @@ const EMITENTE = {
 function carregarCertificado() {
     try {
         if (!process.env.CERT_BASE64) {
-            console.log("Aviso: CERT_BASE64 não configurado.");
+            console.log("Aviso: CERT_BASE64 não configurado nas variáveis de ambiente.");
             return null;
         }
-        const certBuffer = Buffer.from(process.env.CERT_BASE64, 'base64');
+        const certBuffer = Buffer.from(process.env.CERT_BASE64.replace(/\s/g, ''), 'base64');
         const certPath = path.join(__dirname, 'certificado.pfx');
         fs.writeFileSync(certPath, certBuffer);
-        console.log("Certificado digital carregado com sucesso!");
+        console.log("Certificado digital carregado e gravado com sucesso!");
         return certPath;
     } catch (erro) {
-        console.error("Erro ao carregar o certificado:", erro.message);
+        console.error("Erro crítico ao carregar o certificado:", erro.message);
         return null;
     }
 }
@@ -50,7 +50,7 @@ carregarCertificado();
 // Rota de Status
 app.get('/', (req, res) => {
     res.json({ 
-        status: "API Fiscal NFC-e Rodando com Assinatura e Transmissão!",
+        status: "API Fiscal NFC-e Rodando com Assinatura e Transmissão SEFAZ-SP!",
         emitente: EMITENTE.xNome,
         cnpj: EMITENTE.cnpj
     });
@@ -59,10 +59,11 @@ app.get('/', (req, res) => {
 // Rota 1: Gerar o XML e Assinar Digitalmente
 app.post('/emitir-nfce', (req, res) => {
     try {
-        const dadosVenda = req.body;
         const nNF = Math.floor(Math.random() * 999999) + 1;
         const cDV = "5";
-        const chNFe = `352608${EMITENTE.cnpj}65001000${String(nNF).padStart(9, '0')}1${cDV}`;
+        // Ambiente: 2 = Homologação | 1 = Produção
+        const tpAmb = process.env.AMBIENTE_PRODUCAO === 'true' ? "1" : "2"; 
+        const chNFe = `352608${EMITENTE.cnpj}65001000${String(nNF).padStart(9, '0')}${tpAmb}${cDV}`;
 
         let xmlNFe = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
     <infNFe Id="NFe${chNFe}" versao="4.00">
@@ -80,7 +81,7 @@ app.post('/emitir-nfce', (req, res) => {
             <tpImp>4</tpImp>
             <tpEmis>1</tpEmis>
             <cDV>${cDV}</cDV>
-            <tpAmb>2</tpAmb>
+            <tpAmb>${tpAmb}</tpAmb>
             <finNFe>1</finNFe>
             <indFinal>1</indFinal>
             <indPres>1</indPres>
@@ -108,7 +109,7 @@ app.post('/emitir-nfce', (req, res) => {
             <prod>
                 <cProd>001</cProd>
                 <cEAN>SEM GTIN</cEAN>
-                <xProd>Produto de Teste Elaine</xProd>
+                <xProd>Produto de Teste Ibitinga</xProd>
                 <NCM>00000000</NCM>
                 <CFOP>5102</CFOP>
                 <uCom>UN</uCom>
@@ -144,7 +145,7 @@ app.post('/emitir-nfce', (req, res) => {
     </infNFe>
 </NFe>`;
 
-        // Assinatura Digital
+        // Assinatura Digital com SHA-256
         let xmlAssinado = xmlNFe;
         const certPath = path.join(__dirname, 'certificado.pfx');
         if (fs.existsSync(certPath)) {
@@ -164,22 +165,24 @@ app.post('/emitir-nfce', (req, res) => {
             sig.signingKey = privateKey;
             sig.computeSignature(xmlNFe);
             xmlAssinado = sig.getSignedXml();
+        } else {
+            return res.status(500).json({ sucesso: false, erro: "Certificado digital não encontrado no servidor." });
         }
 
         res.json({
             sucesso: true,
-            mensagem: "XML gerado e assinado com sucesso!",
+            mensagem: "XML gerado e assinado digitalmente com sucesso!",
             xmlAssinado,
             chaveAcesso: chNFe
         });
 
     } catch (erro) {
-        console.error("Erro ao gerar/assinar:", erro);
+        console.error("Erro ao gerar/assinar XML:", erro);
         res.status(500).json({ sucesso: false, erro: erro.message });
     }
 });
 
-// Rota 2: Transmitir para a SEFAZ-SP (Homologação) - URL corrigida para /nfe-auth/
+// Rota 2: Transmitir para a SEFAZ-SP com Tratamento de Resposta
 app.post('/transmitir-nfce', async (req, res) => {
     try {
         let { xmlAssinado } = req.body;
@@ -188,6 +191,7 @@ app.post('/transmitir-nfce', async (req, res) => {
             return res.status(400).json({ sucesso: false, erro: "XML assinado não fornecido." });
         }
 
+        // Limpeza de espaços para conformidade com o layout da SEFAZ
         xmlAssinado = xmlAssinado.replace(/>\s+</g, '><').trim();
 
         const httpsAgent = new https.Agent({
@@ -210,28 +214,39 @@ app.post('/transmitir-nfce', async (req, res) => {
             </soap:Body>
         </soap:Envelope>`;
 
-        const resposta = await axios.post(
-            "https://homologacao.nfce.fazenda.sp.gov.br/nfe-auth/services/NFeAutorizacao4.asmx", 
-            soapEnvelope, 
-            {
-                headers: { 
-                    'Content-Type': 'application/soap+xml; charset=utf-8',
-                    'SOAPAction': 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote'
-                },
-                httpsAgent,
-                timeout: 30000
-            }
-        );
+        const isProd = process.env.AMBIENTE_PRODUCAO === 'true';
+        const urlSefaz = isProd 
+            ? "https://nfce.fazenda.sp.gov.br/nfe-auth/services/NFeAutorizacao4.asmx"
+            : "https://homologacao.nfce.fazenda.sp.gov.br/nfe-auth/services/NFeAutorizacao4.asmx";
+
+        const resposta = await axios.post(urlSefaz, soapEnvelope, {
+            headers: { 
+                'Content-Type': 'application/soap+xml; charset=utf-8',
+                'SOAPAction': 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote'
+            },
+            httpsAgent,
+            timeout: 30000
+        });
+
+        const xmlRetorno = resposta.data;
+
+        // Extração automatizada do cStat e xMotivo do retorno da SEFAZ
+        const cStatMatch = xmlRetorno.match(/<cStat>(.*?)<\/cStat>/);
+        const xMotivoMatch = xmlRetorno.match(/<xMotivo>(.*?)<\/xMotivo>/);
+        
+        const cStat = cStatMatch ? cStatMatch[1] : "Desconhecido";
+        const xMotivo = xMotivoMatch ? xMotivoMatch[1] : "Retorno não processado corretamente";
 
         res.json({
-            sucesso: true,
-            mensagem: "Requisição processada pela SEFAZ!",
-            retornoSefaz: resposta.data
+            sucesso: cStat === "100" || cStat === "103" || cStat === "104",
+            cStat,
+            xMotivo,
+            retornoCompletoSefaz: xmlRetorno
         });
 
     } catch (erro) {
         const detalheErro = erro.response ? erro.response.data : erro.message;
-        console.error("Erro na transmissão SEFAZ:", detalheErro);
+        console.error("Erro crítico na transmissão SEFAZ:", detalheErro);
         res.status(500).json({ sucesso: false, erro: detalheErro });
     }
 });
