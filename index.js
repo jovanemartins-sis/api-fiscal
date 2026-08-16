@@ -56,7 +56,7 @@ app.get('/', (req, res) => {
     });
 });
 
-// Função para formatar a data no padrão exigido pela SEFAZ (AAAA-MM-DDThh:mm:ssTZD)
+// Função para formatar a data no padrão exigido pela SEFAZ
 function obterDataSefaz() {
     const agora = new Date();
     const ano = agora.getFullYear();
@@ -65,27 +65,53 @@ function obterDataSefaz() {
     const hora = String(agora.getHours()).padStart(2, '0');
     const min = String(agora.getMinutes()).padStart(2, '0');
     const seg = String(agora.getSeconds()).padStart(2, '0');
-    // Considerando o fuso de Brasília (-03:00)
     return `${ano}-${mes}-${dia}T${hora}:${min}:${seg}-03:00`;
+}
+
+// Função para calcular o Dígito Verificador (DV) da Chave de Acesso (Módulo 11)
+function calcularDV(chave43) {
+    let soma = 0;
+    let peso = 2;
+    for (let i = chave43.length - 1; i >= 0; i--) {
+        soma += parseInt(chave43.charAt(i)) * peso;
+        peso++;
+        if (peso > 9) peso = 2;
+    }
+    let resto = soma % 11;
+    let dv = 11 - resto;
+    if (dv >= 10) dv = 0;
+    return String(dv);
 }
 
 // Rota 1: Gerar o XML e Assinar Digitalmente
 app.post('/emitir-nfce', (req, res) => {
     try {
         const nNF = Math.floor(Math.random() * 999999) + 1;
-        const cDV = "5";
+        const cUF = "35"; // SP
+        const aamm = "2608"; // Ano/Mês atual
+        const cnpj = EMITENTE.cnpj;
+        const mod = "65"; // NFC-e
+        const serie = "001";
+        const nNFStr = String(nNF).padStart(9, '0');
+        const tpEmis = "1"; // Emissão normal
+        const cNF = "00000001"; // Código numérico aleatório/sequencial
+        
+        // Montagem da Chave de Acesso (43 dígitos + 1 dígito verificador)
+        const chave43 = cUF + aamm + cnpj + mod + serie + nNFStr + tpEmis + cNF;
+        const cDV = calcularDV(chave43);
+        const chNFe = chave43 + cDV;
+
         // Ambiente: 2 = Homologação | 1 = Produção
         const tpAmb = process.env.AMBIENTE_PRODUCAO === 'true' ? "1" : "2"; 
-        const chNFe = `352608${EMITENTE.cnpj}65001000${String(nNF).padStart(9, '0')}${tpAmb}${cDV}`;
         const dhEmiStr = obterDataSefaz();
 
         let xmlNFe = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
     <infNFe Id="NFe${chNFe}" versao="4.00">
         <ide>
-            <cUF>35</cUF>
-            <cNF>00000001</cNF>
+            <cUF>${cUF}</cUF>
+            <cNF>${cNF}</cNF>
             <natOp>VENDAS</natOp>
-            <mod>65</mod>
+            <mod>${mod}</mod>
             <serie>1</serie>
             <nNF>${nNF}</nNF>
             <dhEmi>${dhEmiStr}</dhEmi>
@@ -93,7 +119,7 @@ app.post('/emitir-nfce', (req, res) => {
             <idDest>1</idDest>
             <cMunFG>${EMITENTE.enderEmit.cMun}</cMunFG>
             <tpImp>4</tpImp>
-            <tpEmis>1</tpEmis>
+            <tpEmis>${tpEmis}</tpEmis>
             <cDV>${cDV}</cDV>
             <tpAmb>${tpAmb}</tpAmb>
             <finNFe>1</finNFe>
@@ -144,20 +170,14 @@ app.post('/emitir-nfce', (req, res) => {
                     </ICMSSN102>
                 </ICMS>
                 <PIS>
-                    <PISOutr>
-                        <CST>99</CST>
-                        <vBC>0.00</vBC>
-                        <pPIS>0.00</pPIS>
-                        <vPIS>0.00</vPIS>
-                    </PISOutr>
+                    <PISNT>
+                        <CST>07</CST>
+                    </PISNT>
                 </PIS>
                 <COFINS>
-                    <COFINSOutr>
-                        <CST>99</CST>
-                        <vBC>0.00</vBC>
-                        <pCOFINS>0.00</pCOFINS>
-                        <vPCOFINS>0.00</vPCOFINS>
-                    </COFINSOutr>
+                    <COFINSNT>
+                        <CST>07</CST>
+                    </COFINSNT>
                 </COFINS>
             </imposto>
         </det>
