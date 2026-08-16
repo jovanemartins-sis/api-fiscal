@@ -96,12 +96,10 @@ app.post('/emitir-nfce', (req, res) => {
         const tpEmis = "1"; // Emissão normal
         const cNF = "00000001"; // Código numérico aleatório/sequencial
         
-        // Montagem da Chave de Acesso (43 dígitos + 1 dígito verificador)
         const chave43 = cUF + aamm + cnpj + mod + serie + nNFStr + tpEmis + cNF;
         const cDV = calcularDV(chave43);
         const chNFe = chave43 + cDV;
 
-        // Ambiente: 2 = Homologação | 1 = Produção
         const tpAmb = process.env.AMBIENTE_PRODUCAO === 'true' ? "1" : "2"; 
         const dhEmiStr = obterDataSefaz();
 
@@ -223,7 +221,6 @@ app.post('/emitir-nfce', (req, res) => {
     </infNFe>
 </NFe>`;
 
-        // Assinatura Digital com SHA-256
         let xmlAssinado = xmlNFe;
         const certPath = path.join(__dirname, 'certificado.pfx');
         if (fs.existsSync(certPath)) {
@@ -269,7 +266,6 @@ app.post('/transmitir-nfce', async (req, res) => {
             return res.status(400).json({ sucesso: false, erro: "XML assinado não fornecido." });
         }
 
-        // Limpeza de espaços para conformidade estrita com o layout da SEFAZ
         xmlAssinado = xmlAssinado.replace(/>\s+</g, '><').trim();
 
         const httpsAgent = new https.Agent({
