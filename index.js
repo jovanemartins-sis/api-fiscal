@@ -496,7 +496,7 @@ app.post("/emitir-nfce", (req, res) => {
 });
 
 /* =========================================================
-   TRANSMITIR NFC-e
+   TRANSMITIR NFC-e (SOAP 1.1)
 ========================================================= */
 
 app.post("/transmitir-nfce", async (req, res) => {
@@ -512,9 +512,8 @@ app.post("/transmitir-nfce", async (req, res) => {
         const idLote = String(Date.now()).slice(-15);
 
         const soap = `
-<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
-    <soap12:Header/>
-    <soap12:Body>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <soap:Body>
         <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
             <enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
                 <idLote>${idLote}</idLote>
@@ -522,11 +521,10 @@ app.post("/transmitir-nfce", async (req, res) => {
                 ${xmlAssinado}
             </enviNFe>
         </nfeDadosMsg>
-    </soap12:Body>
-</soap12:Envelope>
+    </soap:Body>
+</soap:Envelope>
 `.trim();
 
-        // Carrega e extrai certificado e chave privada via PEM limpo
         const certificado = carregarPfx();
 
         const httpsAgent = new https.Agent({
@@ -537,14 +535,14 @@ app.post("/transmitir-nfce", async (req, res) => {
             maxVersion: "TLSv1.2"
         });
 
-        console.log("Enviando lote para a SEFAZ-SP (Homologação) com mTLS PEM...");
+        console.log("Enviando lote para a SEFAZ-SP via SOAP 1.1...");
 
         const resposta = await axios.post(CONFIG.urlAutorizacao, soap, {
             httpsAgent,
             timeout: 60000,
             headers: {
-                "Content-Type": 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote"',
-                "Accept": "application/soap+xml, text/xml, */*"
+                "Content-Type": "text/xml; charset=utf-8",
+                "SOAPAction": "http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote"
             },
             validateStatus: function (status) {
                 return status < 500;
@@ -558,7 +556,7 @@ app.post("/transmitir-nfce", async (req, res) => {
                 sucesso: false,
                 status: resposta.status,
                 erro: `SEFAZ rejeitou a conexão com HTTP ${resposta.status}`,
-                respostaSefaz: resposta.data || "Nenhum detalhe retornado no corpo (HTTP 400 puro de rede/certificado)."
+                respostaSefaz: resposta.data || "Nenhum detalhe retornado no corpo."
             });
         }
 
