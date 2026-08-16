@@ -526,18 +526,18 @@ app.post("/transmitir-nfce", async (req, res) => {
 </soap12:Envelope>
 `.trim();
 
-        const certPath = carregarCertificado();
-        const pfxBuffer = fs.readFileSync(certPath);
+        // Carrega e extrai certificado e chave privada via PEM limpo
+        const certificado = carregarPfx();
 
         const httpsAgent = new https.Agent({
-            pfx: pfxBuffer,
-            passphrase: process.env.CERT_PASSWORD,
+            key: certificado.privateKey,
+            cert: certificado.publicCert,
             rejectUnauthorized: false,
             minVersion: "TLSv1.2",
             maxVersion: "TLSv1.2"
         });
 
-        console.log("Enviando lote para a SEFAZ-SP (Homologação)...");
+        console.log("Enviando lote para a SEFAZ-SP (Homologação) com mTLS PEM...");
 
         const resposta = await axios.post(CONFIG.urlAutorizacao, soap, {
             httpsAgent,
