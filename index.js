@@ -48,7 +48,7 @@ const CONFIG = {
 };
 
 /* =========================================================
-   CERTIFICADO & mTLS BLINDADO
+   CERTIFICADO & CADEIA mTLS COMPLETA
 ========================================================= */
 
 function carregarCertificado() {
@@ -75,13 +75,17 @@ function carregarPfxParaAssinatura() {
     const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, senha);
 
     let privateKey = null;
-    let publicCert = null;
+    const pems = [];
 
+    // Extrai TODOS os certificados da cadeia (Titular + Intermediárias da AC)
     const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
     const certificados = certBags[forge.pki.oids.certBag] || [];
-    if (certificados.length > 0 && certificados[0].cert) {
-        publicCert = forge.pki.certificateToPem(certificados[0].cert);
+    for (const bag of certificados) {
+        if (bag.cert) {
+            pems.push(forge.pki.certificateToPem(bag.cert));
+        }
     }
+    const publicCert = pems.join("\n");
 
     const keyBagTypes = [forge.pki.oids.pkcs8ShroudedKeyBag, forge.pki.oids.keyBag];
     for (const bagType of keyBagTypes) {
@@ -96,19 +100,18 @@ function carregarPfxParaAssinatura() {
     }
 
     if (!privateKey || !publicCert) {
-        throw new Error("Chave privada ou certificado público não encontrados no PFX.");
+        throw new Error("Chave privada ou cadeia de certificados não encontrada no PFX.");
     }
 
     return { privateKey, publicCert };
 }
 
 function criarHttpsAgent() {
-    // Utiliza as chaves extraídas em PEM, garantindo que o mTLS envie o certificado corretamente para o IIS da SEFAZ
     const certificado = carregarPfxParaAssinatura();
 
     return new https.Agent({
         key: certificado.privateKey,
-        cert: certificado.publicCert,
+        cert: certificado.publicCert, // Envia a cadeia completa exigida pelo IIS da SEFAZ
         rejectUnauthorized: false,
         secureOptions: crypto.constants.SSL_OP_NO_TLSv1 | crypto.constants.SSL_OP_NO_TLSv1_1 | crypto.constants.SSL_OP_NO_TLSv1_3,
         minVersion: "TLSv1.2",
