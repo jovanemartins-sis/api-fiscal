@@ -159,7 +159,7 @@ app.post('/emitir-nfce', (req, res) => {
             sig.addReference(
                 "//*[local-name()='infNFe']",
                 ["http://www.w3.org/2000/09/xmldsig#enveloped-signature", "http://www.w3.org/2001/10/xml-exc-c14n#"],
-                "http://www.w3.org/2001/04/xmlenc#sha256" // Alterado para SHA-256 (Obrigatório pela SEFAZ)
+                "http://www.w3.org/2001/04/xmlenc#sha256"
             );
             sig.signingKey = privateKey;
             sig.computeSignature(xmlNFe);
@@ -179,7 +179,7 @@ app.post('/emitir-nfce', (req, res) => {
     }
 });
 
-// Rota 2: Transmitir para a SEFAZ-SP (Homologação)
+// Rota 2: Transmitir para a SEFAZ-SP (Homologação) - URL corrigida para /nfe-auth/
 app.post('/transmitir-nfce', async (req, res) => {
     try {
         let { xmlAssinado } = req.body;
@@ -188,13 +188,13 @@ app.post('/transmitir-nfce', async (req, res) => {
             return res.status(400).json({ sucesso: false, erro: "XML assinado não fornecido." });
         }
 
-        // Limpeza de espaços excedentes e quebras de linha para evitar erro de formatação na SEFAZ
         xmlAssinado = xmlAssinado.replace(/>\s+</g, '><').trim();
 
         const httpsAgent = new https.Agent({
             pfx: fs.readFileSync(path.join(__dirname, 'certificado.pfx')),
             passphrase: process.env.CERT_PASSWORD,
-            rejectUnauthorized: false
+            rejectUnauthorized: false,
+            secureProtocol: 'TLSv1_2_method'
         });
 
         const soapEnvelope = `<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:stat="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
@@ -211,7 +211,7 @@ app.post('/transmitir-nfce', async (req, res) => {
         </soap:Envelope>`;
 
         const resposta = await axios.post(
-            "https://homologacao.nfce.fazenda.sp.gov.br/nfceWEB/services/NFeAutorizacao4.asmx", 
+            "https://homologacao.nfce.fazenda.sp.gov.br/nfe-auth/services/NFeAutorizacao4.asmx", 
             soapEnvelope, 
             {
                 headers: { 
@@ -219,7 +219,7 @@ app.post('/transmitir-nfce', async (req, res) => {
                     'SOAPAction': 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote'
                 },
                 httpsAgent,
-                timeout: 20000
+                timeout: 30000
             }
         );
 
