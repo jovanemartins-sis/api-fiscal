@@ -38,6 +38,20 @@ function calcularDV(chave43) {
     return (resto < 2) ? "0" : String(11 - resto);
 }
 
+// Provedor para injetar o X509Certificate exigido pela SEFAZ dentro da tag KeyInfo
+function MyKeyInfo(pemCert) {
+    this.getKeyInfo = function(key, prefix) {
+        const cleanCert = pemCert
+            .replace(/-----BEGIN CERTIFICATE-----/g, '')
+            .replace(/-----END CERTIFICATE-----/g, '')
+            .replace(/\r?\n|\r/g, '');
+        return `<X509Data><X509Certificate>${cleanCert}</X509Certificate></X509Data>`;
+    };
+    this.getKey = function(keyInfo) {
+        return null;
+    };
+}
+
 // --- ROTAS ---
 app.get('/', (req, res) => res.json({ status: "API Ativa" }));
 
@@ -48,15 +62,24 @@ app.post('/emitir-nfce', (req, res) => {
         const chBase = "3526086630454100011165001" + nNFStr + "100000001";
         const chNFe = chBase + calcularDV(chBase);
 
-        // XML estruturado exatamente na ordem do leiaute da NFC-e v4.00
+        // XML sem quebras de linha e rigorosamente ordenado
         let xmlNFe = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${chNFe}" versao="4.00"><ide><cUF>35</cUF><cNF>00000001</cNF><natOp>VENDAS</natOp><mod>65</mod><serie>1</serie><nNF>${nNF}</nNF><dhEmi>2026-08-16T17:20:00-03:00</dhEmi><tpNF>1</tpNF><idDest>1</idDest><cMunFG>3519608</cMunFG><tpImp>4</tpImp><tpEmis>1</tpEmis><cDV>${chNFe.slice(-1)}</cDV><tpAmb>2</tpAmb><finNFe>1</finNFe><indFinal>1</indFinal><indPres>1</indPres><procEmi>0</procEmi><verProc>1.0</verProc></ide><emit><CNPJ>${EMITENTE.cnpj}</CNPJ><xNome>${EMITENTE.xNome}</xNome><enderEmit><xLgr>Rua Exemplo</xLgr><nro>123</nro><xBairro>Centro</xBairro><cMun>3519608</cMun><xMun>Ibitinga</xMun><UF>SP</UF><CEP>14940000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></enderEmit><IE>${EMITENTE.ie}</IE><CRT>1</CRT></emit><det nItem="1"><prod><cProd>001</cProd><cEAN>SEM GTIN</cEAN><xProd>TESTE</xProd><NCM>21069090</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>1.0000</qCom><vUnCom>10.00</vUnCom><vProd>10.00</vProd><cEANTrib>SEM GTIN</cEANTrib><uTrib>UN</uTrib><qTrib>1.0000</qTrib><vUnTrib>10.00</vUnTrib><indTot>1</indTot></prod><imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS><PIS><PISNT><CST>07</CST></PISNT></PIS><COFINS><COFINSNT><CST>07</CST></COFINSNT></COFINS></imposto></det><total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>10.00</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>10.00</vNF><vTotTrib>0.00</vTotTrib></ICMSTot></total><transp><modFrete>9</modFrete></transp><pag><detPag><tPag>01</tPag><vPag>10.00</vPag></detPag></pag><infRespTec><CNPJ>${EMITENTE.cnpj}</CNPJ><xContato>Elaine</xContato><email>a@a.com</email><fone>14999999999</fone></infRespTec></infNFe></NFe>`;
 
-        // Leitura do certificado PFX
+        // Leitura da chave privada e certificado público do PFX
         const pfxData = fs.readFileSync(path.join(__dirname, 'certificado.pfx'));
         const p12Asn1 = forge.asn1.fromDer(pfxData.toString('binary'));
         const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, process.env.CERT_PASSWORD);
         
         let privateKey = null;
+        let publicCert = null;
+
+        // Extrai o certificado público
+        const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
+        if (certBags[forge.pki.oids.certBag]?.[0]?.cert) {
+            publicCert = forge.pki.certificateToPem(certBags[forge.pki.oids.certBag][0].cert);
+        }
+
+        // Extrai a chave privada
         try {
             const bags = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
             if (bags[forge.pki.oids.pkcs8ShroudedKeyBag]?.[0]?.key) {
@@ -73,11 +96,12 @@ app.post('/emitir-nfce', (req, res) => {
             } catch (e) {}
         }
 
-        if (!privateKey) {
-            return res.status(500).json({ sucesso: false, erro: "Chave privada não encontrada no certificado PFX." });
+        if (!privateKey || !publicCert) {
+            return res.status(500).json({ sucesso: false, erro: "Chave privada ou certificado público não foram encontrados no PFX." });
         }
 
         const sig = new SignedXml();
+        sig.keyInfoProvider = new MyKeyInfo(publicCert);
         sig.addReference(
             "//*[local-name()='infNFe']", 
             ["http://www.w3.org/2000/09/xmldsig#enveloped-signature", "http://www.w3.org/2001/10/xml-exc-c14n#"], 
@@ -88,7 +112,7 @@ app.post('/emitir-nfce', (req, res) => {
 
         let xmlAssinado = sig.getSignedXml();
 
-        // Limpeza profunda de atributos vazios ou namespaces redundantes gerados pelo xml-crypto que causam o erro 225
+        // Limpa possíveis atributos nulos injetados em tags filhas
         xmlAssinado = xmlAssinado.replace(/xmlns=""/g, '');
 
         res.json({ sucesso: true, xmlAssinado, chaveAcesso: chNFe });
