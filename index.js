@@ -568,14 +568,35 @@ app.post("/transmitir-nfce", async (req, res) => {
         });
 
     } catch (erro) {
-        console.error("ERRO CRÍTICO NA TRANSMISSÃO:", erro.message);
-        if (erro.code) console.error("Código do Erro de Rede:", erro.code);
+        console.error("========== ERRO REAL SEFAZ ==========");
+        console.error("message:", erro.message);
+        console.error("code:", erro.code);
+        console.error("errno:", erro.errno);
+        console.error("syscall:", erro.syscall);
+        console.error("hostname:", erro.hostname);
+        console.error("stack:", erro.stack);
 
-        res.status(500).json({
+        if (erro.response) {
+            console.error("HTTP STATUS:", erro.response.status);
+            console.error("HEADERS:", erro.response.headers);
+            console.error("DATA:", erro.response.data);
+        }
+
+        if (erro.request) {
+            console.error("REQUEST EXISTE: SIM");
+        }
+
+        console.error("=====================================");
+
+        return res.status(500).json({
             sucesso: false,
-            status: 500,
             erro: erro.message,
-            detalhe: "Verifique se a senha do certificado (CERT_PASSWORD) está correta e se o arquivo PFX é válido."
+            codigo: erro.code || null,
+            errno: erro.errno || null,
+            syscall: erro.syscall || null,
+            hostname: erro.hostname || null,
+            status: erro.response?.status || null,
+            respostaSefaz: erro.response?.data || null
         });
     }
 });
