@@ -56,6 +56,19 @@ app.get('/', (req, res) => {
     });
 });
 
+// Função para formatar a data no padrão exigido pela SEFAZ (AAAA-MM-DDThh:mm:ssTZD)
+function obterDataSefaz() {
+    const agora = new Date();
+    const ano = agora.getFullYear();
+    const mes = String(agora.getMonth() + 1).padStart(2, '0');
+    const dia = String(agora.getDate()).padStart(2, '0');
+    const hora = String(agora.getHours()).padStart(2, '0');
+    const min = String(agora.getMinutes()).padStart(2, '0');
+    const seg = String(agora.getSeconds()).padStart(2, '0');
+    // Considerando o fuso de Brasília (-03:00)
+    return `${ano}-${mes}-${dia}T${hora}:${min}:${seg}-03:00`;
+}
+
 // Rota 1: Gerar o XML e Assinar Digitalmente
 app.post('/emitir-nfce', (req, res) => {
     try {
@@ -64,6 +77,7 @@ app.post('/emitir-nfce', (req, res) => {
         // Ambiente: 2 = Homologação | 1 = Produção
         const tpAmb = process.env.AMBIENTE_PRODUCAO === 'true' ? "1" : "2"; 
         const chNFe = `352608${EMITENTE.cnpj}65001000${String(nNF).padStart(9, '0')}${tpAmb}${cDV}`;
+        const dhEmiStr = obterDataSefaz();
 
         let xmlNFe = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
     <infNFe Id="NFe${chNFe}" versao="4.00">
@@ -74,7 +88,7 @@ app.post('/emitir-nfce', (req, res) => {
             <mod>65</mod>
             <serie>1</serie>
             <nNF>${nNF}</nNF>
-            <dhEmi>${new Date().toISOString()}</dhEmi>
+            <dhEmi>${dhEmiStr}</dhEmi>
             <tpNF>1</tpNF>
             <idDest>1</idDest>
             <cMunFG>${EMITENTE.enderEmit.cMun}</cMunFG>
@@ -129,19 +143,57 @@ app.post('/emitir-nfce', (req, res) => {
                         <CSOSN>102</CSOSN>
                     </ICMSSN102>
                 </ICMS>
-                <PIS><PISOutr><CST>99</CST><vBC>0.00</vBC><pPIS>0.00</pPIS><vPIS>0.00</vPIS></PISOutr></PIS>
-                <COFINS><COFINSOutr><CST>99</CST><vBC>0.00</vBC><pCOFINS>0.00</pCOFINS><vPCOFINS>0.00</vPCOFINS></COFINSOutr></COFINS>
+                <PIS>
+                    <PISOutr>
+                        <CST>99</CST>
+                        <vBC>0.00</vBC>
+                        <pPIS>0.00</pPIS>
+                        <vPIS>0.00</vPIS>
+                    </PISOutr>
+                </PIS>
+                <COFINS>
+                    <COFINSOutr>
+                        <CST>99</CST>
+                        <vBC>0.00</vBC>
+                        <pCOFINS>0.00</pCOFINS>
+                        <vPCOFINS>0.00</vPCOFINS>
+                    </COFINSOutr>
+                </COFINS>
             </imposto>
         </det>
         <total>
             <ICMSTot>
-                <vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet>
-                <vProd>150.00</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol>
-                <vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>150.00</vNF><vTotTrib>0.00</vTotTrib>
+                <vBC>0.00</vBC>
+                <vICMS>0.00</vICMS>
+                <vICMSDeson>0.00</vICMSDeson>
+                <vFCP>0.00</vFCP>
+                <vBCST>0.00</vBCST>
+                <vST>0.00</vST>
+                <vFCPST>0.00</vFCPST>
+                <vFCPSTRet>0.00</vFCPSTRet>
+                <vProd>150.00</vProd>
+                <vFrete>0.00</vFrete>
+                <vSeg>0.00</vSeg>
+                <vDesc>0.00</vDesc>
+                <vII>0.00</vII>
+                <vIPI>0.00</vIPI>
+                <vIPIDevol>0.00</vIPIDevol>
+                <vPIS>0.00</vPIS>
+                <vCOFINS>0.00</vCOFINS>
+                <vOutro>0.00</vOutro>
+                <vNF>150.00</vNF>
+                <vTotTrib>0.00</vTotTrib>
             </ICMSTot>
         </total>
-        <transp><modFrete>9</modFrete></transp>
-        <pag><detPag><tPag>01</tPag><vPag>150.00</vPag></detPag></pag>
+        <transp>
+            <modFrete>9</modFrete>
+        </transp>
+        <pag>
+            <detPag>
+                <tPag>01</tPag>
+                <vPag>150.00</vPag>
+            </detPag>
+        </pag>
     </infNFe>
 </NFe>`;
 
@@ -182,7 +234,7 @@ app.post('/emitir-nfce', (req, res) => {
     }
 });
 
-// Rota 2: Transmitir para a SEFAZ-SP com Envelope SOAP Corrigido
+// Rota 2: Transmitir para a SEFAZ-SP
 app.post('/transmitir-nfce', async (req, res) => {
     try {
         let { xmlAssinado } = req.body;
@@ -201,7 +253,6 @@ app.post('/transmitir-nfce', async (req, res) => {
             secureProtocol: 'TLSv1_2_method'
         });
 
-        // Envelope SOAP estruturado no padrão exato da SEFAZ-SP (soap12)
         const soapEnvelope = `<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
             <soap12:Body>
                 <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
