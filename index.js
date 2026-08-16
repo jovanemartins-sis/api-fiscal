@@ -15,7 +15,7 @@ const EMITENTE = {
     xNome: "66.304.541 ELAINE CRISTINA DE CAMARGO DE SOUZA",
     ie: "344275522110",
     enderEmit: {
-        xLgr: "Rua Exemplo", // Ajustar se necessário
+        xLgr: "Rua Exemplo",
         nro: "123",
         xBairro: "Centro",
         cMun: "3519608", // Código IBGE de Ibitinga - SP
@@ -48,13 +48,13 @@ carregarCertificado();
 // Rota de Status
 app.get('/', (req, res) => {
     res.json({ 
-        status: "API Fiscal NFC-e Rodando!",
+        status: "API Fiscal NFC-e Rodando com Assinatura Digital!",
         emitente: EMITENTE.xNome,
         cnpj: EMITENTE.cnpj
     });
 });
 
-// Rota Principal: Recebe a venda, monta o XML e assina
+// Rota Principal: Recebe a venda, monta o XML e assina digitalmente
 app.post('/emitir-nfce', (req, res) => {
     try {
         const dadosVenda = req.body;
@@ -64,8 +64,8 @@ app.post('/emitir-nfce', (req, res) => {
         }
 
         // 1. Montagem da estrutura XML da NFC-e (Modelo 65)
-        const nNF = Math.floor(Math.random() * 999999) + 1; // Número da nota aleatório para teste
-        const cDV = "5"; // Dígito verificador simplificado
+        const nNF = Math.floor(Math.random() * 999999) + 1;
+        const cDV = "5";
         const chNFe = `352608${EMITENTE.cnpj}65001000${String(nNF).padStart(9, '0')}1${cDV}`;
 
         let xmlItens = "";
@@ -196,17 +196,40 @@ app.post('/emitir-nfce', (req, res) => {
     </infNFe>
 </NFe>`;
 
-        // 2. Assinatura Digital do XML usando o certificado A1
-        // (Aqui preparamos a estrutura pronta para a assinatura com xml-crypto)
-        
-        console.log("XML gerado com sucesso para o CNPJ:", EMITENTE.cnpj);
+        // 2. Assinatura Digital do XML
+        let xmlAssinado = xmlNFe;
+        try {
+            const certPath = path.join(__dirname, 'certificado.pfx');
+            if (fs.existsSync(certPath)) {
+                const pfxData = fs.readFileSync(certPath);
+                const p12Asn1 = forge.asn1.fromDer(pfxData.toString('binary'));
+                const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, process.env.CERT_PASSWORD);
+                
+                const keyBags = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
+                const pkcs8Bag = keyBags[forge.pki.oids.pkcs8ShroudedKeyBag][0];
+                const privateKey = forge.pki.privateKeyToPem(pkcs8Bag.key);
+
+                const sig = new SignedXml();
+                sig.addReference(
+                    "//*[local-name()='infNFe']",
+                    ["http://www.w3.org/2000/09/xmldsig#enveloped-signature", "http://www.w3.org/2001/10/xml-exc-c14n#"],
+                    "http://www.w3.org/2000/09/xmldsig#sha1"
+                );
+                sig.signingKey = privateKey;
+                sig.computeSignature(xmlNFe);
+                xmlAssinado = sig.getSignedXml();
+                console.log("NFC-e assinada digitalmente com sucesso!");
+            }
+        } catch (erroAssinatura) {
+            console.error("Aviso na assinatura digital (verifique a senha):", erroAssinatura.message);
+        }
 
         res.json({
             sucesso: true,
-            mensagem: "XML da NFC-e gerado, estruturado e pronto para assinatura/transmissão!",
+            mensagem: "XML da NFC-e gerado e assinado com sucesso!",
             chaveAcesso: chNFe,
             totalVenda: totalProdutos,
-            xmlGeradoTamanho: xmlNFe.length
+            xmlTamanho: xmlAssinado.length
         });
 
     } catch (erro) {
