@@ -64,7 +64,6 @@ function carregarCertificado() {
     return certPath;
 }
 
-// Usado para extrair chaves para a Assinatura XML (xml-crypto)
 function carregarPfxParaAssinatura() {
     const certPath = carregarCertificado();
     const senha = process.env.CERT_PASSWORD;
@@ -102,7 +101,6 @@ function carregarPfxParaAssinatura() {
     return { privateKey, publicCert };
 }
 
-// Usado para criar o agente HTTPS nativo seguro para a SEFAZ (mTLS)
 function criarHttpsAgent() {
     const certPath = carregarCertificado();
     const senha = process.env.CERT_PASSWORD;
@@ -242,84 +240,7 @@ function montarXmlNFCe(dados) {
     const dv = chave.slice(-1);
     const valorFormatado = "10.00";
 
-    const xml = `
-<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
-<infNFe Id="NFe${chave}" versao="4.00">
-<ide>
-<cUF>${CONFIG.uf}</cUF>
-<cNF>${cNF}</cNF>
-<natOp>VENDA</natOp>
-<mod>65</mod>
-<serie>${serie}</serie>
-<nNF>${numero}</nNF>
-<dhEmi>${dataHora}</dhEmi>
-<tpNF>1</tpNF>
-<idDest>1</idDest>
-<cMunFG>${CONFIG.municipio}</cMunFG>
-<tpImp>4</tpImp>
-<tpEmis>${tpEmis}</tpEmis>
-<cDV>${dv}</cDV>
-<tpAmb>${CONFIG.ambiente}</tpAmb>
-<finNFe>1</finNFe>
-<indFinal>1</indFinal>
-<indPres>1</indPres>
-<procEmi>0</procEmi>
-<verProc>1.0.0</verProc>
-</ide>
-<emit>
-<CNPJ>${EMITENTE.cnpj}</CNPJ>
-<xNome>${EMITENTE.xNome}</xNome>
-<enderEmit>
-<xLgr>${EMITENTE.endereco.xLgr}</xLgr>
-<nro>${EMITENTE.endereco.nro}</nro>
-<xBairro>${EMITENTE.endereco.xBairro}</xBairro>
-<cMun>${EMITENTE.endereco.cMun}</cMun>
-<xMun>${EMITENTE.endereco.xMun}</xMun>
-<UF>${EMITENTE.endereco.UF}</UF>
-<CEP>${EMITENTE.endereco.CEP}</CEP>
-<cPais>${EMITENTE.endereco.cPais}</cPais>
-<xPais>${EMITENTE.endereco.xPais}</xPais>
-<fone>${EMITENTE.endereco.fone}</fone>
-</enderEmit>
-<IE>${EMITENTE.ie}</IE>
-<CRT>1</CRT>
-</emit>
-<det nItem="1">
-<prod>
-<cProd>001</cProd>
-<cEAN>SEM GTIN</cEAN>
-<xProd>PRODUTO TESTE</xProd>
-<NCM>21069090</NCM>
-<CFOP>5102</CFOP>
-<uCom>UN</uCom>
-<qCom>1.0000</qCom>
-<vUnCom>10.0000000000</vUnCom>
-<vProd>${valorFormatado}</vProd>
-<cEANTrib>SEM GTIN</cEANTrib>
-<uTrib>UN</uTrib>
-<qTrib>1.0000</qTrib>
-<vUnTrib>10.0000000000</vUnTrib>
-<indTot>1</indTot>
-</prod>
-<imposto>
-<ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS>
-<PIS><PISOutr><CST>99</CST><vBC>0.00</vBC><pPIS>0.00</pPIS><vPIS>0.00</vPIS></PISOutr></PIS>
-<COFINS><COFINSOutr><CST>99</CST><vBC>0.00</vBC><pCOFINS>0.00</pCOFINS><vCOFINS>0.00</vCOFINS></COFINSOutr></COFINS>
-</imposto>
-</det>
-<total>
-<ICMSTot>
-<vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP>
-<vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet>
-<vProd>${valorFormatado}</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc>
-<vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS>
-<vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>${valorFormatado}</vNF><vTotTrib>0.00</vTotTrib>
-</ICMSTot>
-</total>
-<transp><modFrete>9</modFrete></transp>
-<pag><detPag><tPag>01</tPag><vPag>${valorFormatado}</vPag></detPag></pag>
-</infNFe>
-</NFe>`.trim();
+    const xml = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${chave}" versao="4.00"><ide><cUF>${CONFIG.uf}</cUF><cNF>${cNF}</cNF><natOp>VENDA</natOp><mod>65</mod><serie>${serie}</serie><nNF>${numero}</nNF><dhEmi>${dataHora}</dhEmi><tpNF>1</tpNF><idDest>1</idDest><cMunFG>${CONFIG.municipio}</cMunFG><tpImp>4</tpImp><tpEmis>${tpEmis}</tpEmis><cDV>${dv}</cDV><tpAmb>${CONFIG.ambiente}</tpAmb><finNFe>1</finNFe><indFinal>1</indFinal><indPres>1</indPres><procEmi>0</procEmi><verProc>1.0.0</verProc></ide><emit><CNPJ>${EMITENTE.cnpj}</CNPJ><xNome>${EMITENTE.xNome}</xNome><enderEmit><xLgr>${EMITENTE.endereco.xLgr}</xLgr><nro>${EMITENTE.endereco.nro}</nro><xBairro>${EMITENTE.endereco.xBairro}</xBairro><cMun>${EMITENTE.endereco.cMun}</cMun><xMun>${EMITENTE.endereco.xMun}</xMun><UF>${EMITENTE.endereco.UF}</UF><CEP>${EMITENTE.endereco.CEP}</CEP><cPais>${EMITENTE.endereco.cPais}</cPais><xPais>${EMITENTE.endereco.xPais}</xPais><fone>${EMITENTE.endereco.fone}</fone></enderEmit><IE>${EMITENTE.ie}</IE><CRT>1</CRT></emit><det nItem="1"><prod><cProd>001</cProd><cEAN>SEM GTIN</cEAN><xProd>PRODUTO TESTE</xProd><NCM>21069090</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>1.0000</qCom><vUnCom>10.0000000000</vUnCom><vProd>${valorFormatado}</vProd><cEANTrib>SEM GTIN</cEANTrib><uTrib>UN</uTrib><qTrib>1.0000</qTrib><vUnTrib>10.0000000000</vUnTrib><indTot>1</indTot></prod><imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS><PIS><PISOutr><CST>99</CST><vBC>0.00</vBC><pPIS>0.00</pPIS><vPIS>0.00</vPIS></PISOutr></PIS><COFINS><COFINSOutr><CST>99</CST><vBC>0.00</vBC><pCOFINS>0.00</pCOFINS><vCOFINS>0.00</vCOFINS></COFINSOutr></COFINS></imposto></det><total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>${valorFormatado}</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>${valorFormatado}</vNF><vTotTrib>0.00</vTotTrib></ICMSTot></total><transp><modFrete>9</modFrete></transp><pag><detPag><tPag>01</tPag><vPag>${valorFormatado}</vPag></detPag></pag></infNFe></NFe>`;
 
     return { xml, chave };
 }
@@ -357,20 +278,9 @@ app.post("/transmitir-nfce", async (req, res) => {
         const xmlAssinado = req.body.xmlAssinado;
         const idLote = String(Date.now()).slice(-15);
 
-        const soap = `
-<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
-    <soap12:Body>
-        <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
-            <enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
-                <idLote>${idLote}</idLote>
-                <indSinc>1</indSinc>
-                ${xmlAssinado}
-            </enviNFe>
-        </nfeDadosMsg>
-    </soap12:Body>
-</soap12:Envelope>`.trim();
+        // Envelope SOAP rigoroso sem quebras de linha que corrompem o parser do IIS/ASMX da SEFAZ
+        const soap = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4"><enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><idLote>${idLote}</idLote><indSinc>1</indSinc>${xmlAssinado}</enviNFe></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
 
-        // Agente HTTPS com PFX nativo para mTLS perfeito na SEFAZ
         const httpsAgent = criarHttpsAgent();
 
         const resposta = await axios.post(CONFIG.urlAutorizacao, soap, {
