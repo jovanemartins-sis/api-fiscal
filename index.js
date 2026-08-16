@@ -48,7 +48,7 @@ const CONFIG = {
 };
 
 /* =========================================================
-   CERTIFICADO & CADEIA mTLS COMPLETA
+   CERTIFICADO & mTLS NATIVO
 ========================================================= */
 
 function carregarCertificado() {
@@ -65,10 +65,10 @@ function carregarCertificado() {
     return certPath;
 }
 
+// Usado para a assinatura digital do XML (Node-Forge)
 function carregarPfxParaAssinatura() {
     const certPath = carregarCertificado();
-    const senha = process.env.CERT_PASSWORD;
-    if (senha === undefined) throw new Error("CERT_PASSWORD não configurada.");
+    const senha = process.env.CERT_PASSWORD || "";
 
     const pfxData = fs.readFileSync(certPath);
     const p12Asn1 = forge.asn1.fromDer(pfxData.toString("binary"));
@@ -77,7 +77,6 @@ function carregarPfxParaAssinatura() {
     let privateKey = null;
     const pems = [];
 
-    // Extrai TODOS os certificados da cadeia (Titular + Intermediárias da AC) para evitar erro 400 no IIS da SEFAZ
     const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
     const certificados = certBags[forge.pki.oids.certBag] || [];
     for (const bag of certificados) {
@@ -100,20 +99,22 @@ function carregarPfxParaAssinatura() {
     }
 
     if (!privateKey || !publicCert) {
-        throw new Error("Chave privada ou cadeia de certificados não encontrada no PFX.");
+        throw new Error("Chave privada ou certificado não encontrado no PFX.");
     }
 
     return { privateKey, publicCert };
 }
 
+// Agent HTTPS nativo que injeta o PFX direto no canal TLS (Resolve o erro 400 da SEFAZ)
 function criarHttpsAgent() {
-    const certificado = carregarPfxParaAssinatura();
+    const certPath = carregarCertificado();
+    const senha = process.env.CERT_PASSWORD || "";
+    const pfxBuffer = fs.readFileSync(certPath);
 
     return new https.Agent({
-        key: certificado.privateKey,
-        cert: certificado.publicCert,
+        pfx: pfxBuffer,
+        passphrase: senha,
         rejectUnauthorized: false,
-        secureOptions: crypto.constants.SSL_OP_NO_TLSv1 | crypto.constants.SSL_OP_NO_TLSv1_1 | crypto.constants.SSL_OP_NO_TLSv1_3,
         minVersion: "TLSv1.2",
         maxVersion: "TLSv1.2"
     });
@@ -285,15 +286,14 @@ app.post("/transmitir-nfce", async (req, res) => {
         const soap = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4"><enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><idLote>${idLote}</idLote><indSinc>1</indSinc>${xmlAssinado}</enviNFe></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
 
         const httpsAgent = criarHttpsAgent();
-
-        console.log("--- ENVIANDO LOTE PARA SEFAZ-SP ---");
-        console.log("Lote ID:", idLote);
+        const contentLength = Buffer.byteLength(soap, "utf8");
 
         const resposta = await axios.post(CONFIG.urlAutorizacao, soap, {
             httpsAgent,
             timeout: 60000,
             headers: {
                 "Content-Type": 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote"',
+                "Content-Length": contentLength,
                 "Accept": "application/soap+xml, text/xml, */*"
             },
             validateStatus: () => true
