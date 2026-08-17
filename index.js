@@ -44,7 +44,7 @@ const CONFIG = {
     serie: 1,
     ambiente: 2, // 2 = homologação
     modelo: "65",
-    urlAutorizacao: "https://homologacao.nfce.fazenda.sp.gov.br/ws/NFeAutorizacao4.asmx"
+    urlAutorizacao: "https://homologacao.nfce.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx"
 };
 
 /* =========================================================
@@ -65,7 +65,6 @@ function carregarCertificado() {
     return certPath;
 }
 
-// Usado para a assinatura digital do XML (Node-Forge)
 function carregarPfxParaAssinatura() {
     const certPath = carregarCertificado();
     const senha = process.env.CERT_PASSWORD || "";
@@ -105,7 +104,6 @@ function carregarPfxParaAssinatura() {
     return { privateKey, publicCert };
 }
 
-// Agent HTTPS nativo que injeta o PFX direto no canal TLS (Resolve o erro 400 da SEFAZ)
 function criarHttpsAgent() {
     const certPath = carregarCertificado();
     const senha = process.env.CERT_PASSWORD || "";
