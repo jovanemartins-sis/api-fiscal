@@ -4,7 +4,7 @@
   "description": "API de Emissão e Transmissão de NFC-e",
   "main": "index.js",
   "scripts": {
-    "start": "node --openssl-legacy-provider server.js"
+    "start": "node --openssl-legacy-provider index.js"
   },
   "dependencies": {
     "axios": "^1.6.8",
